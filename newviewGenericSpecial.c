@@ -7950,12 +7950,11 @@ void newviewIterative (tree *tr)
 		    }
 		}
 	     
-
 	      switch(tInfo->tipCase)
 		{
 		case TIP_TIP:		  
 		  tipX1    = tr->partitionData[model].yVector[tInfo->qNumber];
-		  tipX2    = tr->partitionData[model].yVector[tInfo->rNumber];		 		 		 
+		  tipX2    = tr->partitionData[model].yVector[tInfo->rNumber];
 		  
 		  x1_presenceMap = tr->partitionData[model].presenceMap[tInfo->qNumber];
 		  x2_presenceMap = tr->partitionData[model].presenceMap[tInfo->rNumber];
@@ -8042,10 +8041,10 @@ void newviewIterative (tree *tr)
 			ex3[k] = ex2[k];
 		    }
 		  break;
-		case INNER_INNER:		 		 		    
+		case INNER_INNER:
 		  x1_start       = tr->partitionData[model].xVector[tInfo->qNumber - tr->mxtips - 1];
 		  x2_start       = tr->partitionData[model].xVector[tInfo->rNumber - tr->mxtips - 1];
-		      
+
 		  if(tr->saveMemory)
 		    {		      
 		      x1_gapColumn   = &tr->partitionData[model].gapColumn[(tInfo->qNumber - tr->mxtips - 1) * states * rateHet];
@@ -8111,6 +8110,14 @@ void newviewIterative (tree *tr)
 		  rz = tInfo->rz[0];
 		}
 
+	      if (tr->useQS)
+		{
+		  tInfo->tipCase = INNER_INNER;
+		  x1_start       = tr->partitionData[model].xVector[tInfo->qNumber];
+		  x2_start       = tr->partitionData[model].xVector[tInfo->rNumber];
+		  x3_start 	 = tr->partitionData[model].xVector[tInfo->pNumber];
+		}
+
 #ifdef _BASTIEN
 	      if(tr->doBastienStuff)
 		{
@@ -8125,7 +8132,6 @@ void newviewIterative (tree *tr)
 		}
 #endif	      	  
 	     
-	      
 	      switch(tr->partitionData[model].dataType)
 		{
 		case BINARY_DATA:

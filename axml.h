@@ -593,6 +593,9 @@ typedef struct {
  
   unsigned char            **yVector;
  
+  // seq QS
+  double          **tipProbVector;
+  // seq QS
 
   //asc bias
   boolean ascBias;  
@@ -1066,6 +1069,9 @@ typedef  struct  {
   
   int *origNumSitePerModel;
   boolean doSubtreeEPA;
+
+  boolean useQS;
+  double seqErrRate;
 
 } tree;
 

@@ -3782,6 +3782,13 @@ static void getVects(tree *tr, unsigned char **tipX1, unsigned char **tipX2, dou
 	}
     }
 
+  if (tr->useQS)
+    {
+      *tipCase = INNER_INNER;
+      *x1_start = tr->partitionData[model].xVector[pNumber];
+      *x2_start = tr->partitionData[model].xVector[qNumber];
+    }
+
 }
 
 

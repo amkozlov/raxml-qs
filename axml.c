@@ -3331,11 +3331,14 @@ static void allocPartitions(tree *tr)
       tr->partitionData[i].yVector = (unsigned char **)rax_malloc(sizeof(unsigned char*) * (tr->mxtips + 1));
 
            
-      tr->partitionData[i].xVector = (double **)rax_malloc(sizeof(double*) * tr->innerNodes);     
-      tr->partitionData[i].xSpaceVector = (size_t *)rax_calloc(tr->innerNodes, sizeof(size_t));	
+      size_t
+	numNodes = tr->useQS ? tr->innerNodes + tr->mxtips + 1 : tr->innerNodes;
+
+      tr->partitionData[i].xVector = (double **)rax_malloc(sizeof(double*) * numNodes);
+      tr->partitionData[i].xSpaceVector = (size_t *)rax_calloc(numNodes, sizeof(size_t));
            
-      tr->partitionData[i].expVector      = (int **)rax_malloc(sizeof(int*) * tr->innerNodes);
-      tr->partitionData[i].expSpaceVector = (size_t *)rax_calloc(tr->innerNodes, sizeof(size_t));
+      tr->partitionData[i].expVector      = (int **)rax_malloc(sizeof(int*) * numNodes);
+      tr->partitionData[i].expSpaceVector = (size_t *)rax_calloc(numNodes, sizeof(size_t));
 
       tr->partitionData[i].mxtips  = tr->mxtips;
 
@@ -5339,6 +5342,8 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   tr->doBastienStuff = FALSE;
 #endif
 
+  tr->useQS = FALSE;
+
   /********* tr inits end*************/
 
   for(i = 1; i < argc; i++)
@@ -5356,7 +5361,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   while(1)
     {      
       static struct 
-	option long_options[11] =
+	option long_options[12] =
 	{
 	  /* These options set a flag. */
 	  {"mesquite",     no_argument,       &flag, 1},
@@ -5369,6 +5374,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	  {"epa-keep-placements",       required_argument, &flag, 1},
 	  {"epa-accumulated-threshold", required_argument, &flag, 1},
 	  {"epa-prob-threshold",        required_argument, &flag, 1}, 
+	  {"seq-error-rate",            required_argument, &flag, 1},
 	  /* These options don't set a flag.
 	     We distinguish them by their indices. */
 	  //{"add",     no_argument,       0, 'a'},
@@ -5538,6 +5544,20 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 		}	    
 
 	      epaSet = TRUE;
+	      break;
+	    case 10:
+	      if(sscanf(optarg, "%lf", &(tr->seqErrRate)) != 1)
+		{
+		  printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
+		  errorExit(-1);
+		}
+	      if(tr->seqErrRate < 0.0 || tr->seqErrRate > 1.0)
+		{
+		  printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
+		  errorExit(-1);
+		}
+
+	      tr->useQS = TRUE;
 	      break;
 	    default:
 	      if(flagCheck)
@@ -8453,6 +8473,129 @@ static void threadFixModelIndices(tree *tr, tree *localTree, int tid, int n)
     }
 }
 
+static void initTipProbVector(tree *tr, tree *localTree)
+{
+  size_t
+    model,
+    i;
+
+  for(model = 0; model < (size_t)localTree->NumberOfModels; model++)
+    {
+      size_t
+	width =  localTree->partitionData[model].width,
+	states = (size_t)(localTree->partitionData[model].states),
+	probWidth =  states * width;
+
+      double
+        r = (double) random() / ((double)RAND_MAX + 1),
+        err    = tr->seqErrRate * r * 2,
+	ptrue  = 1.0 - err,
+        pfalse =  err / (states - 1);
+
+      for(i = 1; i < tr->mxtips + 1; i++)
+	{
+	  size_t
+	    offset = 0;
+	  size_t
+	    j, k, l;
+	  unsigned char
+	    *yv = localTree->partitionData[model].yVector[i];
+
+	  double
+	    *pv = localTree->partitionData[model].tipProbVector[i];
+
+	  assert(yv != NULL);
+	  assert(pv != NULL);
+
+	  for(j = 0; j < width; j++)
+	    {
+	      for(l = 0; l < states; l++)
+		{
+		  if ((i + j) % 2 < 3)
+		    {
+		      if ((yv[j] >> l) & 1)
+			pv[offset] = ptrue;
+		      else
+			pv[offset] = pfalse;
+		    }
+		  else
+		    {
+		      if ((yv[j] >> l) & 1)
+			pv[offset] = 1.0;
+		      else
+			pv[offset] = 0.0;
+		    }
+
+		  offset++;
+		}
+	    }
+	  assert(offset == probWidth);
+	}
+    }
+}
+
+static void updateTipXVectors(tree *tr, tree *localTree)
+{
+  size_t
+    model,
+    i;
+
+  for(model = 0; model < (size_t)localTree->NumberOfModels; model++)
+    {
+      size_t
+	width =  localTree->partitionData[model].width,
+	rateCat = (size_t)(localTree->discreteRateCategories),
+	states = (size_t)(localTree->partitionData[model].states),
+	xWidth =  rateCat * states * width;
+
+      for(i = 1; i < tr->mxtips + 1; i++)
+	{
+	  size_t
+	    offset = 0;
+	  size_t
+	    j, k, l, m;
+//	  unsigned char
+//	    *tipX1 = localTree->partitionData[model].yVector[i];
+
+	  double
+	    *xv = localTree->partitionData[model].xVector[i],
+	    *pv = localTree->partitionData[model].tipProbVector[i],
+	    *EV = tr->partitionData[model].EV;
+
+	  assert(pv != NULL);
+	  assert(xv != NULL);
+
+	  for(j = 0; j < width; j++)
+	    {
+//	      double
+//		*tipv = &(localTree->partitionData[model].tipVector[states * tipX1[j]]);
+
+	      double
+		*prob = &pv[j * states];
+
+	      for(k = 0; k < rateCat; k++)
+		for(l = 0; l < states; l++)
+		  {
+//		    xv[offset] = tipv[l];
+		    xv[offset] = 0;
+		    for(m = 0; m < states; m++)
+		      xv[offset] += prob[m] * EV[states * m + l];
+
+		    if(xv[offset] > MAX_TIP_EV)
+		      xv[offset] = MAX_TIP_EV;
+
+//		    assert(fabs(tipv[l] - xv[offset]) < 0.00001);
+
+		    offset++;
+		  }
+	    }
+
+	  assert(offset == xWidth);
+	}
+
+//      printf("Set xVector OK\n");
+    }
+}
 
 static void initPartition(tree *tr, tree *localTree, int tid)
 {
@@ -8470,6 +8613,7 @@ static void initPartition(tree *tr, tree *localTree, int tid)
       localTree->useFastScaling          = tr->useFastScaling;
       localTree->perPartitionEPA         = tr->perPartitionEPA;
       localTree->maxCategories           = tr->maxCategories;
+      localTree->useQS           	 = tr->useQS;
      
       localTree->originalCrunchedLength  = tr->originalCrunchedLength;
       localTree->NumberOfModels          = tr->NumberOfModels;
@@ -8581,11 +8725,43 @@ static void allocNodex(tree *tr, int tid, int n)
 	}
       
       //asc
-		             
-      for(i = 0; i < tr->innerNodes; i++)
+
+      // seq QS
+      if (tr->useQS)
 	{
-	  tr->partitionData[model].xVector[i]   = (double*)NULL;     
-	  tr->partitionData[model].expVector[i]   = (int*)NULL;
+	  size_t
+	    rateCat = (size_t)(tr->discreteRateCategories),
+	    states = (size_t)(tr->partitionData[model].states),
+	    xWidth =  rateCat * states * width;
+
+	  for(i = 0; i < tr->innerNodes + tr->mxtips + 1; i++)
+	    {
+	      tr->partitionData[model].xVector[i]   = (double*)rax_malloc(xWidth * sizeof(double));
+	      tr->partitionData[model].xSpaceVector[i] = xWidth * sizeof(double);
+	      if(tr->useFastScaling)
+		tr->partitionData[model].expVector[i]   = (int*)NULL;
+	      else
+		{
+		  tr->partitionData[model].expVector[i] = (int*)rax_calloc((size_t) width, sizeof(int));
+		  tr->partitionData[model].expSpaceVector[i] = width * sizeof(int);
+		}
+	    }
+
+	    tr->partitionData[model].tipProbVector = (double **)rax_malloc(sizeof(double*) * (tr->mxtips + 1));
+	    for(i = 1; i < tr->mxtips + 1; i++)
+	      {
+		tr->partitionData[model].tipProbVector[i] = (double *)rax_malloc(sizeof(double) * states * width);
+	      }
+
+	}
+      // seq QS
+      else
+	{
+	  for(i = 0; i < tr->innerNodes; i++)
+	    {
+	      tr->partitionData[model].xVector[i]   = (double*)NULL;
+	      tr->partitionData[model].expVector[i]   = (int*)NULL;
+	    }
 	}
     }
 
@@ -8809,6 +8985,11 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
 	      copyLG4(localTree, tr, model, pl);
 	    }
 	}
+
+      if (tr->useQS)
+	 {
+	   updateTipXVectors(tr, localTree);
+	 }
       break;
     case THREAD_OPT_RATE:
       if(tid > 0)
@@ -8828,8 +9009,12 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
 	    }
 	}
 
-      result = evaluateIterative(localTree, FALSE);
+      if (tr->useQS)
+	 {
+	   updateTipXVectors(tr, localTree);
+	 }
 
+      result = evaluateIterative(localTree, FALSE);
 
       if(localTree->NumberOfModels > 1)
 	{
@@ -8934,6 +9119,10 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
 	      localTree->partitionData[model].propInvariant = tr->partitionData[model].propInvariant;
 	    }
 	}
+      if (tr->useQS)
+	 {
+	   updateTipXVectors(tr, localTree);
+	 }
       break;     
     case THREAD_COPY_INIT_MODEL:
       if(tid > 0)
@@ -8981,6 +9170,12 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
 
 		 localIndex++;
 	       }	  
+	 }
+
+       if (tr->useQS)
+	 {
+	   initTipProbVector(tr, localTree);
+	   updateTipXVectors(tr, localTree);
 	 }
       break;    
     case THREAD_RATE_CATS:
@@ -13104,7 +13299,7 @@ int main (int argc, char *argv[])
 		}
 	      else
 		{	      
-		  modOpt(tr, adef, TRUE, adef->likelihoodEpsilon);	  
+		  modOpt(tr, adef, TRUE, adef->likelihoodEpsilon);
 #ifdef _BASTIEN
 		  printf("likelihood of current tree: %f\n", tr->likelihood);
 

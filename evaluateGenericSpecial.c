@@ -3092,6 +3092,12 @@ double evaluateIterative(tree *tr,  boolean writeVector)
 	  else
 	    z = pz[0];
 
+	  if (tr->useQS)
+	    {
+	      x1_start       = tr->partitionData[model].xVector[pNumber];
+	      x2_start       = tr->partitionData[model].xVector[qNumber];
+	      tip 	     = (unsigned char*)NULL;
+	    }
 
 #ifdef _BASTIEN
 	  if(tr->doBastienStuff)
@@ -3481,8 +3487,8 @@ double evaluateIterative(tree *tr,  boolean writeVector)
 	   
 	  if(width > 0)
 	    {	      	      	      	  
-	      if(tr->useFastScaling)		    	      		      
-		partitionLikelihood += (tr->partitionData[model].globalScaler[pNumber] + tr->partitionData[model].globalScaler[qNumber]) * LOG(minlikelihood);		    
+	      if(tr->useFastScaling)
+		partitionLikelihood += (tr->partitionData[model].globalScaler[pNumber] + tr->partitionData[model].globalScaler[qNumber]) * LOG(minlikelihood);
 	      
 	      assert(partitionLikelihood < 0.0);
 #ifdef _USE_PTHREADS
