@@ -77,10 +77,8 @@ char run_id[128] = "",
   mesquiteModel[1024] = "",
   mesquiteTrees[1024] = "",
   mesquiteMLTrees[1024]="",
-  mesquiteMLLikes[1024] = "";
-
-
-
+  mesquiteMLLikes[1024] = "",
+  fastqFileName[1024] = "";
 
 
 char *protModels[NUM_PROT_MODELS] = {"DAYHOFF", "DCMUT", "JTT", "MTREV", "WAG", "RTREV", "CPREV", "VT", 

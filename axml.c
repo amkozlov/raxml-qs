@@ -893,6 +893,11 @@ static boolean setupTree (tree *tr, analdef *adef)
     {
       tr->yVector      = (unsigned char **)  rax_malloc((tr->mxtips + 1) * sizeof(unsigned char *));
 
+      if (tr->useFASTQ)
+	tr->tipErrVector  = (double **)  rax_malloc((tr->mxtips + 1) * sizeof(double *));
+      else
+	tr->tipErrVector  = NULL;
+
       tr->fracchanges  = (double *)rax_malloc(tr->NumberOfModels * sizeof(double));    
 
       tr->rawFracchanges = (double *)rax_malloc(tr->NumberOfModels * sizeof(double));  
@@ -1760,7 +1765,89 @@ static void parseFasta(analdef *adef, rawdata *rdta, tree *tr)
   return;
 }
 
+double phredToErr(char phred, unsigned char offset)
+{
+  return exp10(-1 * (phred - offset) / 10.);
+}
 
+static void parseFASTQ(analdef *adef, rawdata *rdta, tree *tr)
+{
+  INFILE = myfopen(fastqFileName, "rb");
+
+  char
+    *line = NULL,
+    *seq_line = rax_malloc((rdta->sites+2) * sizeof(char));
+
+  size_t
+    len = 0,
+    line_num = 0,
+    taxon_num = 1;
+
+  ssize_t
+    read;
+
+  while((read = rax_getline(&line, &len, INFILE)) != -1)
+    {
+      if (line_num % 4 == 1)
+	{
+	  assert(read <= rdta->sites + 2);
+
+	  strcpy(seq_line, line);
+	}
+      else if (line_num % 4 == 3)
+	{
+	  // TODO move this out of here!!
+	  tr->tipErrVector[taxon_num] = (double *)rax_malloc(sizeof(double) *  rdta->sites);
+
+	  int
+	    tip_pos = 0,
+	    i;
+
+	  double
+	    *errv = tr->tipErrVector[taxon_num];
+
+//          printf("\nTaxon # %d: ", taxon_num);
+
+	  for (i = 0; i < read - 1; ++i)
+	    {
+	      int
+		ch;
+
+//	      printf("Char: %d\n\n", rdta->y[taxon_num][tip_pos]);
+
+	      while ((ch = rdta->y[taxon_num][tip_pos + 1]) == getUndetermined(DNA_DATA))
+		{
+		  errv[tip_pos] = 0.;
+		  tip_pos++;
+		}
+
+	      if (inverseMeaningDNA[ch] != seq_line[i])
+		{
+		  printf("ERROR: base mismatch in taxa %d between FASTA (base %d = %c) and FASTQ (base %d = %c)!\n",
+		         taxon_num, tip_pos + 1, inverseMeaningDNA[ch], i + 1, seq_line[i]);
+		  errorExit(-1);
+		}
+
+	      double
+		err = phredToErr(line[i], 33);
+
+	      errv[tip_pos] = err;
+	      tip_pos++;
+
+//	      printf("%.3f ", err);
+	    }
+
+	  assert(tip_pos == rdta->sites);
+
+	  taxon_num++;
+	}
+      line_num++;
+    }
+
+  rax_free(seq_line);
+  if (line)
+    rax_free(line);
+}
 
 static void inputweights (rawdata *rdta)
 {
@@ -1996,6 +2083,11 @@ static void getinput(analdef *adef, rawdata *rdta, cruncheddata *cdta, tree *tr)
 	}
 
       fclose(INFILE);
+    }
+
+  if (tr->useQS && strcmp(fastqFileName, ""))
+    {
+      parseFASTQ(adef, rdta, tr);
     }
 }
 
@@ -5343,6 +5435,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 #endif
 
   tr->useQS = FALSE;
+  tr->useFASTQ = FALSE;
 
   /********* tr inits end*************/
 
@@ -5361,7 +5454,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   while(1)
     {      
       static struct 
-	option long_options[12] =
+	option long_options[13] =
 	{
 	  /* These options set a flag. */
 	  {"mesquite",     no_argument,       &flag, 1},
@@ -5375,6 +5468,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	  {"epa-accumulated-threshold", required_argument, &flag, 1},
 	  {"epa-prob-threshold",        required_argument, &flag, 1}, 
 	  {"seq-error-rate",            required_argument, &flag, 1},
+	  {"fastq",            required_argument, &flag, 1},
 	  /* These options don't set a flag.
 	     We distinguish them by their indices. */
 	  //{"add",     no_argument,       0, 'a'},
@@ -5558,6 +5652,12 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 		}
 
 	      tr->useQS = TRUE;
+	      break;
+	    case 11:
+	      strcpy(fastqFileName, optarg);
+	      tr->useQS = TRUE;
+	      tr->useFASTQ = TRUE;
+	      adef->compressPatterns  = FALSE;
 	      break;
 	    default:
 	      if(flagCheck)
@@ -6838,6 +6938,13 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
     {
       if(processID == 0)
 	printf("\n Error: please specify an alignment for this run with -s\n");
+      errorExit(-1);
+    }
+
+  if (adef->useMultipleModel && tr->useQS)
+    {
+      if(processID == 0)
+	printf("\n Error: multi-gene alignments cannot be used with sequence quality scores!\n");
       errorExit(-1);
     }
 
@@ -8446,7 +8553,11 @@ static void threadFixModelIndices(tree *tr, tree *localTree, int tid, int n)
 	      localTree->partitionData[model].rateCategory[localCounter] = tr->cdta->rateCategory[globalCounter];	      
 
 	      for(j = 1; j <= (size_t)localTree->mxtips; j++)
-	       localTree->partitionData[model].yVector[j][localCounter] = tr->yVector[j][globalCounter]; 	     
+		{
+		  localTree->partitionData[model].yVector[j][localCounter] = tr->yVector[j][globalCounter];
+		  if (tr->useQS && tr->tipErrVector)
+		    localTree->partitionData[model].tipErrVector[j][localCounter] = tr->tipErrVector[j][globalCounter];
+		}
 
 	      localCounter++;
 	    }
@@ -8486,11 +8597,8 @@ static void initTipProbVector(tree *tr, tree *localTree)
 	states = (size_t)(localTree->partitionData[model].states),
 	probWidth =  states * width;
 
-      double
-        r = (double) random() / ((double)RAND_MAX + 1),
-        err    = tr->seqErrRate * r * 2,
-	ptrue  = 1.0 - err,
-        pfalse =  err / (states - 1);
+      int
+	undetermined = getUndetermined(localTree->partitionData[model].dataType);
 
       for(i = 1; i < tr->mxtips + 1; i++)
 	{
@@ -8507,27 +8615,51 @@ static void initTipProbVector(tree *tr, tree *localTree)
 	  assert(yv != NULL);
 	  assert(pv != NULL);
 
+	  if (localTree->threadID == 0) printf("\nTaxon # %d: \n", i);
+
 	  for(j = 0; j < width; j++)
 	    {
+	      double
+		err;
+
+	      if (tr->seqErrRate > 0.)
+		{
+//		  double
+//		    r = (double) random() / ((double)RAND_MAX + 1);
+//
+//		    err = tr->seqErrRate * r * 2;
+
+		  err = tr->seqErrRate;
+		}
+	      else
+		{
+		  err = localTree->partitionData[model].tipErrVector[i][j];
+		}
+
+	      double
+	        ptrue  = 1.0 - err,
+	        pfalse =  err / (states - 1);
+
 	      for(l = 0; l < states; l++)
 		{
-		  if ((i + j) % 2 < 3)
+		  if (yv[j] != undetermined)
 		    {
 		      if ((yv[j] >> l) & 1)
 			pv[offset] = ptrue;
 		      else
 			pv[offset] = pfalse;
+
+		      if (localTree->threadID == 0) printf("%.3f ", pv[offset]);
 		    }
 		  else
 		    {
-		      if ((yv[j] >> l) & 1)
 			pv[offset] = 1.0;
-		      else
-			pv[offset] = 0.0;
 		    }
 
 		  offset++;
 		}
+
+	      if (localTree->threadID == 0) printf("\t");
 	    }
 	  assert(offset == probWidth);
 	}
@@ -8748,9 +8880,15 @@ static void allocNodex(tree *tr, int tid, int n)
 	    }
 
 	    tr->partitionData[model].tipProbVector = (double **)rax_malloc(sizeof(double*) * (tr->mxtips + 1));
+	    if (tr->useFASTQ)
+	      tr->partitionData[model].tipErrVector = (double **)rax_malloc(sizeof(double*) * (tr->mxtips + 1));
+	    else
+	      tr->partitionData[model].tipErrVector = (double **) NULL;
 	    for(i = 1; i < tr->mxtips + 1; i++)
 	      {
 		tr->partitionData[model].tipProbVector[i] = (double *)rax_malloc(sizeof(double) * states * width);
+		if (tr->useFASTQ)
+		  tr->partitionData[model].tipErrVector[i] = (double *)rax_malloc(sizeof(double) * width);
 	      }
 
 	}
