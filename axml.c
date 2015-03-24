@@ -5436,6 +5436,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 
   tr->useQS = FALSE;
   tr->useFASTQ = FALSE;
+  tr->estimateSeqErr = FALSE;
 
   /********* tr inits end*************/
 
@@ -5640,17 +5641,24 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	      epaSet = TRUE;
 	      break;
 	    case 10:
-	      if(sscanf(optarg, "%lf", &(tr->seqErrRate)) != 1)
+	      if (strcmp(optarg, "auto") == 0)
 		{
-		  printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
-		  errorExit(-1);
+		  tr->seqErrRate = 0.0;
+		  tr->estimateSeqErr = TRUE;
 		}
-	      if(tr->seqErrRate < 0.0 || tr->seqErrRate > 1.0)
+	      else
 		{
-		  printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
-		  errorExit(-1);
+		  if(sscanf(optarg, "%lf", &(tr->seqErrRate)) != 1)
+		    {
+		      printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
+		      errorExit(-1);
+		    }
+		  if(tr->seqErrRate < 0.0 || tr->seqErrRate > 1.0)
+		    {
+		      printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
+		      errorExit(-1);
+		    }
 		}
-
 	      tr->useQS = TRUE;
 	      break;
 	    case 11:
@@ -8615,25 +8623,25 @@ static void initTipProbVector(tree *tr, tree *localTree)
 	  assert(yv != NULL);
 	  assert(pv != NULL);
 
-	  if (localTree->threadID == 0) printf("\nTaxon # %d: \n", i);
+//	  if (localTree->threadID == 0) printf("\nTaxon # %d: \n", i);
 
 	  for(j = 0; j < width; j++)
 	    {
 	      double
 		err;
 
-	      if (tr->seqErrRate > 0.)
+	      if (tr->useFASTQ)
 		{
-//		  double
-//		    r = (double) random() / ((double)RAND_MAX + 1);
-//
-//		    err = tr->seqErrRate * r * 2;
-
-		  err = tr->seqErrRate;
+		  err = localTree->partitionData[model].tipErrVector[i][j];
 		}
 	      else
 		{
-		  err = localTree->partitionData[model].tipErrVector[i][j];
+		  //		  double
+		  //		    r = (double) random() / ((double)RAND_MAX + 1);
+		  //
+		  //		    err = tr->seqErrRate * r * 2;
+
+		  err = tr->seqErrRate;
 		}
 
 	      double
@@ -8649,7 +8657,7 @@ static void initTipProbVector(tree *tr, tree *localTree)
 		      else
 			pv[offset] = pfalse;
 
-		      if (localTree->threadID == 0) printf("%.3f ", pv[offset]);
+//		      if (localTree->threadID == 0) printf("%.3f ", pv[offset]);
 		    }
 		  else
 		    {
@@ -8659,7 +8667,7 @@ static void initTipProbVector(tree *tr, tree *localTree)
 		  offset++;
 		}
 
-	      if (localTree->threadID == 0) printf("\t");
+//	      if (localTree->threadID == 0) printf("\t");
 	    }
 	  assert(offset == probWidth);
 	}
@@ -9220,6 +9228,32 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
 
       result = evaluateIterative(localTree, FALSE);
 
+
+      if(localTree->NumberOfModels > 1)
+	{
+	  for(model = 0; model < localTree->NumberOfModels; model++)
+	    reductionBuffer[tid *  localTree->NumberOfModels + model] = localTree->perPartitionLH[model];
+	}
+      else
+	reductionBuffer[tid] = result;
+
+      if(tid > 0)
+	{
+	  for(model = 0; model < localTree->NumberOfModels; model++)
+	    localTree->executeModel[model] = TRUE;
+	}
+      break;
+    case THREAD_OPT_SEQERR:
+
+      initTipProbVector(tr, localTree);
+      updateTipXVectors(tr, localTree);
+
+      if(tid > 0)
+	{
+	  memcpy(localTree->executeModel, tr->executeModel, localTree->NumberOfModels * sizeof(boolean));
+	}
+
+      result = evaluateIterative(localTree, FALSE);
 
       if(localTree->NumberOfModels > 1)
 	{

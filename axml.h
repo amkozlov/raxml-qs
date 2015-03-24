@@ -1074,6 +1074,7 @@ typedef  struct  {
   // seq QS
   boolean useQS;
   boolean useFASTQ;
+  boolean estimateSeqErr;
   double seqErrRate;
   double **tipErrVector;
   // seq QS
@@ -1589,6 +1590,7 @@ extern void testInsertThoroughIterative(tree *tr, int branchNumber);
 #define THREAD_OPT_LG4X_RATES               45
 #define THREAD_FREE_VECTORS                 46
 #define THREAD_SETUP_PRESENCE_MAP           47
+#define THREAD_OPT_SEQERR		    48
 
 
 /*

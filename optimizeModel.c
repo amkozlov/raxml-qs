@@ -79,6 +79,7 @@ extern volatile double          *reductionBuffer;
 #ifdef _HET
 #define RATE_F_HET 7
 #endif
+#define SEQERR_F   8
 
 
 static void brentGeneric(double *ax, double *bx, double *cx, double *fb, double tol, double *xmin, double *result, int numberOfModels, 
@@ -351,6 +352,9 @@ static void changeModelParameters(int index, int rateNumber, double value, int w
 	initReversibleGTR(tr, index);
       }
       break;
+    case SEQERR_F:
+      tr->seqErrRate = value;
+      break;
     default:
       assert(0);
     }
@@ -491,10 +495,13 @@ static void evaluateChange(tree *tr, int rateNumber, double *value, double *resu
       break;
     case LXRATE_F:
       assert(rateNumber != -1);
+      break;
     case LXWEIGHT_F:
       assert(rateNumber != -1);
       break;
     case FREQ_F:
+      break;
+    case SEQERR_F:
       break;
     default:
       assert(0);
@@ -518,6 +525,9 @@ static void evaluateChange(tree *tr, int rateNumber, double *value, double *resu
       break;
     case ALPHA_F:	
       masterBarrier(THREAD_OPT_ALPHA, tr);
+      break;
+    case SEQERR_F:
+      masterBarrier(THREAD_OPT_SEQERR, tr);
       break;
     case INVAR_F:
       masterBarrier(THREAD_OPT_INVAR, tr);
@@ -567,6 +577,7 @@ static void evaluateChange(tree *tr, int rateNumber, double *value, double *resu
     case SCALER_F:
     case LXRATE_F: 
     case FREQ_F:
+    case SEQERR_F:
       evaluateGenericInitrav(tr, tr->start);
       //printf("%f \n", tr->likelihood);
       break;
@@ -1415,6 +1426,11 @@ static void optParamGeneric(tree *tr, double modelEpsilon, linkageList *ll, int 
 		  //lim_sup[pos] = _lim_sup;
 		  startValues[pos] = tr->partitionData[index].freqExponents[rateNumber];
 		  break;
+		case SEQERR_F:
+		  lim_inf[pos] = _lim_inf;
+		  lim_sup[pos] = _lim_sup;
+		  startValues[pos] = tr->seqErrRate;
+		  break;
 		default:
 		  assert(0);
 		}
@@ -1543,6 +1559,9 @@ static void optParamGeneric(tree *tr, double modelEpsilon, linkageList *ll, int 
     case INVAR_F:
       masterBarrier(THREAD_COPY_INVAR, tr);	 
       break;
+    case SEQERR_F:
+      masterBarrier(THREAD_OPT_SEQERR, tr);
+      break;
     case SCALER_F: 
       //nothing to do here      
       break;
@@ -1565,6 +1584,7 @@ static void optParamGeneric(tree *tr, double modelEpsilon, linkageList *ll, int 
     case RATE_F:              
     case ALPHA_F:       
     case INVAR_F:     
+    case SEQERR_F:
       break;
     case SCALER_F:       
       evaluateGenericInitrav(tr, tr->start);
@@ -2254,6 +2274,15 @@ static void optAlphasGeneric(tree *tr, double modelEpsilon, linkageList *ll)
     ll->ld[i].valid = TRUE;
 }
 
+static void optSeqErrorRate(tree *tr, double modelEpsilon, linkageList *ll)
+{
+  optParamGeneric(tr, modelEpsilon, ll, 1, -1, 0.0, 0.75, SEQERR_F);
+
+  int
+    i;
+  for(i = 0; i < ll->entries; i++)
+    ll->ld[i].valid = TRUE;
+}
 
 
 
@@ -3456,7 +3485,8 @@ void modOpt(tree *tr, analdef *adef, boolean resetModel, double likelihoodEpsilo
     *invarList,
     *rateList,
     *scalerList,
-    *freqList; 
+    *freqList,
+    *seqerrList;
   /*
     int linkedAlpha[4] = {0, 0, 0, 0};   
     int linkedInvar[4] = {0, 0, 0, 0}; 
@@ -3481,6 +3511,7 @@ void modOpt(tree *tr, analdef *adef, boolean resetModel, double likelihoodEpsilo
   rateList  = initLinkageListGTR(tr);
   scalerList = initLinkageList(unlinked, tr);
   freqList = initLinkageList(unlinked, tr);
+  seqerrList = initLinkageList(linked, tr);
     
   if(!(adef->mode == CLASSIFY_ML))
     {
@@ -3680,7 +3711,10 @@ void modOpt(tree *tr, analdef *adef, boolean resetModel, double likelihoodEpsilo
 	  break;	  
 	default:
 	  assert(0);
-	}       
+	}
+
+      if (tr->estimateSeqErr)
+	optSeqErrorRate(tr, modelEpsilon, seqerrList);
       
       //printf("%f \n", tr->likelihood);
 

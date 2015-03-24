@@ -1911,8 +1911,10 @@ void doInference(tree *tr, analdef *adef, rawdata *rdta, cruncheddata *cdta)
 
       if(adef->mesquite)		  	  	 
 	printBothOpen("Mesquite tree file (excluding best final Tree) written to: %s\n\n", mesquiteMLTrees);
-	
       
+      if (tr->useQS)
+	printBothOpen("ML estimate of sequence error rate:   %.5f\n\n", tr->seqErrRate);
+
       printBothOpen("Overall execution time: %f secs or %f hours or %f days\n\n", overallTime, overallTime/3600.0, overallTime/86400.0);    
 #ifdef _WAYNE_MPI 
     }
