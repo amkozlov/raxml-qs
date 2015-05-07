@@ -2090,7 +2090,6 @@ static double evaluateGTRGAMMA(int *ex1, int *ex2, int *wptr,
 	    else
 	      term = LOG(0.25 * FABS(term)) + (ex1[i] + ex2[i]) * LOG(minlikelihood);
 #endif
-	  
 	  sum += wptr[i] * term;
 	}                      	
     }
@@ -3257,7 +3256,8 @@ double evaluateIterative(tree *tr,  boolean writeVector)
 		
 			partitionLikelihood = evaluateGTRGAMMA(ex1, ex2, tr->partitionData[model].wgt,
 							       x1_start, x2_start, tr->partitionData[model].tipVector,
-							       tip, width, diagptable, tr->useFastScaling); 					
+							       tip, width, diagptable, tr->useFastScaling);
+//		      printf("LH: %lf, width: %d, tip: %p\n", partitionLikelihood, width, tip);
 #endif
 		      break; 
 		    case GAMMA_I:

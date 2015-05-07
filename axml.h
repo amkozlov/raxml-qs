@@ -1075,15 +1075,20 @@ typedef  struct  {
   boolean useQS;
   boolean useFASTQ;
   boolean estimateSeqErr;
+  int seqErrMode;
   double seqErrRate;
   double **tipErrVector;
+  double **tipProbVector;
   // seq QS
 
 } tree;
 
-
-
-
+// seq error specification method
+#define SEQERR_NONE           0
+#define SEQERR_UNIFORM_FIXED  1
+#define SEQERR_UNIFORM_AUTO   2
+#define SEQERR_PERSITE_FASTQ  3
+#define SEQERR_PERSITE_CATG   4
 
 typedef struct conntyp {
     double           z[NUM_BRANCHES];           /* branch length */
@@ -1122,6 +1127,8 @@ typedef struct {
 
 #define PHYLIP 0
 #define FASTA  1
+#define FASTQ  2
+#define CATG   3
 
 typedef  struct {
   int              categories;

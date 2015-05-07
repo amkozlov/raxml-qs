@@ -898,6 +898,11 @@ static boolean setupTree (tree *tr, analdef *adef)
       else
 	tr->tipErrVector  = NULL;
 
+      if (tr->seqErrMode == SEQERR_PERSITE_CATG)
+	tr->tipProbVector  = (double **)  rax_malloc((tr->mxtips + 1) * sizeof(double *));
+      else
+	tr->tipProbVector  = NULL;
+
       tr->fracchanges  = (double *)rax_malloc(tr->NumberOfModels * sizeof(double));    
 
       tr->rawFracchanges = (double *)rax_malloc(tr->NumberOfModels * sizeof(double));  
@@ -1447,6 +1452,215 @@ static boolean getdata(analdef *adef, rawdata *rdta, tree *tr)
   return  TRUE;
 }
 
+static void parseCATG(analdef *adef, rawdata *rdta, tree *tr)
+{
+  int
+    meaningDNA[256];
+
+  meaningDNA['A'] =  1;
+  meaningDNA['B'] = 14;
+  meaningDNA['C'] =  2;
+  meaningDNA['D'] = 13;
+  meaningDNA['G'] =  4;
+  meaningDNA['H'] = 11;
+  meaningDNA['K'] = 12;
+  meaningDNA['M'] =  3;
+  meaningDNA['R'] =  5;
+  meaningDNA['S'] =  6;
+  meaningDNA['T'] =  8;
+  meaningDNA['U'] =  8;
+  meaningDNA['V'] =  7;
+  meaningDNA['W'] =  9;
+  meaningDNA['Y'] = 10;
+
+  meaningDNA['N'] =
+    meaningDNA['O'] =
+    meaningDNA['X'] =
+    meaningDNA['-'] =
+    meaningDNA['?'] =
+    getUndetermined(DNA_DATA);
+
+  char
+    buffer[nmlngth + 2],
+    *line = NULL,
+    *seq_line = rax_malloc((rdta->sites+2) * sizeof(char));
+
+  size_t
+    len = 0,
+    taxon_num = 1;
+
+  int
+    ch,
+    i = 0,
+    taxon = 1;
+
+
+  while(ch == ' ' || ch == '\n' || ch == '\t' || ch == '\r')
+	ch = getc(INFILE);
+
+  // parse taxon names
+  while((ch = getc(INFILE)) != EOF)
+    {
+//      printf("%c", ch);
+      if (ch == EOF)
+	{
+	  if(processID == 0)
+	    {
+	      printf("Error parsing alignment: premature file end\n");
+	    }
+	  errorExit(-1);
+	}
+
+      if (ch == ' ' || ch == '\t' || ch == '\n' || ch == '\r')
+	{
+	  if (i > 0)
+	    {
+	      buffer[i] = '\0';
+	      len = strlen(buffer) + 1;
+	      checkTaxonName(buffer, len);
+	      tr->nameList[taxon] = (char *)rax_malloc(sizeof(char) * len);
+	      strcpy(tr->nameList[taxon], buffer);
+	      taxon++;
+	      i = 0;
+  	      if (ch == '\n' || ch == '\r')
+  		break;
+	    }
+	  continue;
+	}
+
+      buffer[i] = ch;
+      i++;
+      if(i >= nmlngth)
+	{
+	  if(processID == 0)
+	    {
+	      printf("Taxon Name too long at taxon %d, adapt constant nmlngth in\n", taxon);
+	      printf("axml.h, current setting %d\n", nmlngth);
+	    }
+	  errorExit(-1);
+	}
+    }
+
+  if (taxon-1 != tr->mxtips)
+    {
+      if(processID == 0)
+	{
+	  printf("ERROR reading alignment: %d taxa in header, but %d taxon names found\n", tr->mxtips, taxon - 1);
+	}
+      errorExit(-1);
+    }
+
+  // TODO think where to move this allocation
+  for (taxon = 1; taxon <= tr->mxtips; taxon++)
+    tr->tipProbVector[taxon] = (double *)rax_malloc(sizeof(double) *  rdta->sites * 4);
+
+  size_t
+    site = 0;
+
+  ssize_t
+    read;
+
+  char
+    prob_buf[255];
+
+  // parse rows = alignment sites
+  while((read = rax_getline(&line, &len, INFILE)) != -1)
+    {
+      ssize_t
+	i = 0;
+
+      while((i < read - 1) && (line[i] == ' ' || line[i] == '\t'))
+	i++;
+
+      // read the consensus sequence - ignore for now
+      taxon = 1;
+      while((i < read - 1) && line[i] != ' ' && line[i] != '\t')
+	{
+//	  seq[] = line[i];
+	  int
+	    ch = line[i];
+//          printf("%c", ch);
+	  uppercase(&ch);
+	  rdta->y[taxon][site+1] = meaningDNA[ch];
+	  if (meaningDNA[ch] < 1)
+	    printf("\ninvalid base: %c\n", ch);
+	  i++;
+	  taxon++;
+	}
+
+      assert(taxon == tr->mxtips + 1);
+
+      // now read base probs/counts for each taxon
+      taxon = 1;
+      while (i < read - 1)
+	{
+	  while((i < read - 1) && (line[i] == ' ' || line[i] == '\t'))
+	    i++;
+
+	  ssize_t
+	    j = 0;
+
+	  while((i < read - 1) && line[i] != ' ' && line[i] != '\t')
+	    {
+	      prob_buf[j] = line[i];
+	      j++;
+	      i++;
+	    }
+
+	  prob_buf[j] = '\0';
+
+	  double
+	    pC, pA, pT, pG;
+
+	  if (sscanf(prob_buf, "%lf,%lf,%lf,%lf", &pC, &pA, &pT, &pG) == 4)
+	    {
+	      // first normalize base probs
+	      double
+		sum = pA + pC + pG + pT;
+
+	      if (sum == 0.)
+		{
+		  // undetermined/uncalled base (N)
+		  pA = pC = pG = pT = 1.0;
+		}
+	      else
+		{
+		  // CAUTIION: may not sum up to 1, fix it??
+		  pA /= sum;
+		  pC /= sum;
+		  pG /= sum;
+		  pT /= sum;
+		}
+
+
+	      double
+		*tipv = &tr->tipProbVector[taxon][site * 4];
+
+	      tipv[0] = pA;
+	      tipv[1] = pC;
+	      tipv[2] = pG;
+	      tipv[3] = pT;
+
+	      taxon++;
+	    }
+	  else
+	    {
+	      if(processID == 0)
+		{
+		  printf("ERROR reading alignment: format error on line %zu, near column %zd:\n", site + 2, i);
+		  printf("%s\n", line);
+		}
+	      errorExit(-1);
+	    }
+
+        }
+
+      site++;
+    }
+
+  printf("CATG sites: %zu / %d\n", site, rdta->sites);
+}
+
 static void parseFasta(analdef *adef, rawdata *rdta, tree *tr)
 {
   int 
@@ -1823,7 +2037,7 @@ static void parseFASTQ(analdef *adef, rawdata *rdta, tree *tr)
 
 	      if (inverseMeaningDNA[ch] != seq_line[i])
 		{
-		  printf("ERROR: base mismatch in taxa %d between FASTA (base %d = %c) and FASTQ (base %d = %c)!\n",
+		  printf("ERROR: base mismatch in taxa %zu between FASTA (base %d = %c) and FASTQ (base %d = %c)!\n",
 		         taxon_num, tip_pos + 1, inverseMeaningDNA[ch], i + 1, seq_line[i]);
 		  errorExit(-1);
 		}
@@ -2068,6 +2282,9 @@ static void getinput(analdef *adef, rawdata *rdta, cruncheddata *cdta, tree *tr)
 	      printf("Problem reading alignment file \n");
 	      errorExit(1);
 	    }
+	  break;
+	case CATG:
+	  parseCATG(adef, rdta, tr);
 	  break;
 	case FASTA:
 	  parseFasta(adef, rdta, tr);
@@ -2880,7 +3097,8 @@ static void checkSequences(tree *tr, rawdata *rdta, analdef *adef)
 	}
     }
 
-  if(count > 0 || countUndeterminedColumns > 0)
+  // hack: always output PHYLIP file if input was CATG
+  if(count > 0 || countUndeterminedColumns > 0 || tr->seqErrMode == SEQERR_PERSITE_CATG)
     {
       char noDupFile[2048];
       char noDupModels[2048];
@@ -5437,6 +5655,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   tr->useQS = FALSE;
   tr->useFASTQ = FALSE;
   tr->estimateSeqErr = FALSE;
+  tr->seqErrMode = SEQERR_NONE;
 
   /********* tr inits end*************/
 
@@ -5468,7 +5687,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	  {"epa-keep-placements",       required_argument, &flag, 1},
 	  {"epa-accumulated-threshold", required_argument, &flag, 1},
 	  {"epa-prob-threshold",        required_argument, &flag, 1}, 
-	  {"seq-error-rate",            required_argument, &flag, 1},
+	  {"seq-error",            required_argument, &flag, 1},
 	  {"fastq",            required_argument, &flag, 1},
 	  /* These options don't set a flag.
 	     We distinguish them by their indices. */
@@ -5645,6 +5864,14 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 		{
 		  tr->seqErrRate = 0.0;
 		  tr->estimateSeqErr = TRUE;
+		  tr->seqErrMode = SEQERR_UNIFORM_AUTO;
+		}
+	      else if (strcmp(optarg, "catg") == 0)
+		{
+		  tr->seqErrRate = 0.0;
+		  tr->seqErrMode = SEQERR_PERSITE_CATG;
+		  adef->alignmentFileType = CATG;
+		  adef->compressPatterns  = FALSE;
 		}
 	      else
 		{
@@ -5658,6 +5885,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 		      printf("\nError parsing sequencing error rate, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
 		      errorExit(-1);
 		    }
+		  tr->seqErrMode = SEQERR_UNIFORM_FIXED;
 		}
 	      tr->useQS = TRUE;
 	      break;
@@ -5665,6 +5893,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	      strcpy(fastqFileName, optarg);
 	      tr->useQS = TRUE;
 	      tr->useFASTQ = TRUE;
+	      tr->seqErrMode = SEQERR_PERSITE_FASTQ;
 	      adef->compressPatterns  = FALSE;
 	      break;
 	    default:
@@ -8563,8 +8792,17 @@ static void threadFixModelIndices(tree *tr, tree *localTree, int tid, int n)
 	      for(j = 1; j <= (size_t)localTree->mxtips; j++)
 		{
 		  localTree->partitionData[model].yVector[j][localCounter] = tr->yVector[j][globalCounter];
-		  if (tr->useQS && tr->tipErrVector)
-		    localTree->partitionData[model].tipErrVector[j][localCounter] = tr->tipErrVector[j][globalCounter];
+		  if (tr->useQS)
+		    {
+		      if (tr->tipErrVector)
+			localTree->partitionData[model].tipErrVector[j][localCounter] = tr->tipErrVector[j][globalCounter];
+		      else if (tr->tipProbVector)
+			{
+			  size_t
+			    states = tr->partitionData[model].states;
+			  memcpy(&localTree->partitionData[model].tipProbVector[j][localCounter * states], &tr->tipProbVector[j][globalCounter * states], sizeof(double) * states);
+			}
+		    }
 		}
 
 	      localCounter++;
@@ -8594,6 +8832,10 @@ static void threadFixModelIndices(tree *tr, tree *localTree, int tid, int n)
 
 static void initTipProbVector(tree *tr, tree *localTree)
 {
+  // nothing to do for CATG, since tipProbVector is already intialized
+  if (tr->seqErrMode == SEQERR_PERSITE_CATG)
+    return;
+
   size_t
     model,
     i;
@@ -8623,14 +8865,12 @@ static void initTipProbVector(tree *tr, tree *localTree)
 	  assert(yv != NULL);
 	  assert(pv != NULL);
 
-//	  if (localTree->threadID == 0) printf("\nTaxon # %d: \n", i);
-
 	  for(j = 0; j < width; j++)
 	    {
 	      double
 		err;
 
-	      if (tr->useFASTQ)
+	      if (tr->seqErrMode == SEQERR_PERSITE_FASTQ)
 		{
 		  err = localTree->partitionData[model].tipErrVector[i][j];
 		}
@@ -8645,8 +8885,8 @@ static void initTipProbVector(tree *tr, tree *localTree)
 		}
 
 	      double
-	        ptrue  = 1.0 - err,
-	        pfalse =  err / (states - 1);
+		ptrue  = 1.0 - err,
+		pfalse =  err / (states - 1);
 
 	      for(l = 0; l < states; l++)
 		{
@@ -8657,7 +8897,6 @@ static void initTipProbVector(tree *tr, tree *localTree)
 		      else
 			pv[offset] = pfalse;
 
-//		      if (localTree->threadID == 0) printf("%.3f ", pv[offset]);
 		    }
 		  else
 		    {
@@ -8666,9 +8905,8 @@ static void initTipProbVector(tree *tr, tree *localTree)
 
 		  offset++;
 		}
+	  }
 
-//	      if (localTree->threadID == 0) printf("\t");
-	    }
 	  assert(offset == probWidth);
 	}
     }
@@ -8683,10 +8921,17 @@ static void updateTipXVectors(tree *tr, tree *localTree)
   for(model = 0; model < (size_t)localTree->NumberOfModels; model++)
     {
       size_t
+	rateHet;
+
+      if(tr->rateHetModel == CAT)
+	rateHet = 1;
+      else
+	rateHet = 4;
+
+      size_t
 	width =  localTree->partitionData[model].width,
-	rateCat = (size_t)(localTree->discreteRateCategories),
 	states = (size_t)(localTree->partitionData[model].states),
-	xWidth =  rateCat * states * width;
+	xWidth =  rateHet * states * width;
 
       for(i = 1; i < tr->mxtips + 1; i++)
 	{
@@ -8713,7 +8958,7 @@ static void updateTipXVectors(tree *tr, tree *localTree)
 	      double
 		*prob = &pv[j * states];
 
-	      for(k = 0; k < rateCat; k++)
+	      for(k = 0; k < rateHet; k++)
 		for(l = 0; l < states; l++)
 		  {
 //		    xv[offset] = tipv[l];
@@ -8870,9 +9115,16 @@ static void allocNodex(tree *tr, int tid, int n)
       if (tr->useQS)
 	{
 	  size_t
-	    rateCat = (size_t)(tr->discreteRateCategories),
+	    rateHet;
+
+	  if(tr->rateHetModel == CAT)
+	    rateHet = 1;
+	  else
+	    rateHet = 4;
+
+	  size_t
 	    states = (size_t)(tr->partitionData[model].states),
-	    xWidth =  rateCat * states * width;
+	    xWidth =  rateHet * states * width;
 
 	  for(i = 0; i < tr->innerNodes + tr->mxtips + 1; i++)
 	    {
@@ -9300,6 +9552,7 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
       if(tid > 0)
 	{
 	  localTree->rateHetModel       = tr->rateHetModel;
+	  localTree->seqErrMode       	= tr->seqErrMode;
 
 	  for(model = 0; model < localTree->NumberOfModels; model++)
 	    {
@@ -9346,7 +9599,7 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
 
        if (tr->useQS)
 	 {
-	   initTipProbVector(tr, localTree);
+           initTipProbVector(tr, localTree);
 	   updateTipXVectors(tr, localTree);
 	 }
       break;    
@@ -9385,6 +9638,25 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
     case THREAD_CAT_TO_GAMMA:
       if(tid > 0)
 	localTree->rateHetModel = tr->rateHetModel;
+
+      if (tr->useQS)
+	{
+	  // reallocate xVectors since they now have 4 entries per site
+	  for(i = 0; i < tr->innerNodes + tr->mxtips + 1; i++)
+	    {
+	      for(model = 0; model < localTree->NumberOfModels; model++)
+		{
+		  size_t
+		    xWidth = 4 * localTree->partitionData[model].states * localTree->partitionData[model].width;
+
+		  rax_free(localTree->partitionData[model].xVector[i]);
+		  localTree->partitionData[model].xVector[i]   = (double*)rax_malloc(xWidth * sizeof(double));
+		  localTree->partitionData[model].xSpaceVector[i] = xWidth * sizeof(double);
+		}
+	    }
+
+	   updateTipXVectors(tr, localTree);
+	}
       break;
     case THREAD_GAMMA_TO_CAT:
       if(tid > 0)
