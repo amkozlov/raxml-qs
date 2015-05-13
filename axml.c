@@ -1555,10 +1555,12 @@ static void parseCATG(analdef *adef, rawdata *rdta, tree *tr)
     tr->tipProbVector[taxon] = (double *)rax_malloc(sizeof(double) *  rdta->sites * 4);
 
   size_t
-    site = 0;
-
-  ssize_t
+    site = 0,
     read;
+
+  uint64_t
+    total = 0,
+    gaps  = 0;
 
   char
     prob_buf[255];
@@ -1572,14 +1574,12 @@ static void parseCATG(analdef *adef, rawdata *rdta, tree *tr)
       while((i < read - 1) && (line[i] == ' ' || line[i] == '\t'))
 	i++;
 
-      // read the consensus sequence - ignore for now
+      // read the consensus sequence
       taxon = 1;
       while((i < read - 1) && line[i] != ' ' && line[i] != '\t')
 	{
-//	  seq[] = line[i];
 	  int
 	    ch = line[i];
-//          printf("%c", ch);
 	  uppercase(&ch);
 	  rdta->y[taxon][site+1] = meaningDNA[ch];
 	  if (meaningDNA[ch] < 1)
@@ -1622,6 +1622,7 @@ static void parseCATG(analdef *adef, rawdata *rdta, tree *tr)
 		{
 		  // undetermined/uncalled base (N)
 		  pA = pC = pG = pT = 1.0;
+		  gaps++;
 		}
 	      else
 		{
@@ -1641,6 +1642,7 @@ static void parseCATG(analdef *adef, rawdata *rdta, tree *tr)
 	      tipv[2] = pG;
 	      tipv[3] = pT;
 
+	      total++;
 	      taxon++;
 	    }
 	  else
@@ -1658,7 +1660,16 @@ static void parseCATG(analdef *adef, rawdata *rdta, tree *tr)
       site++;
     }
 
-  printf("CATG sites: %zu / %d\n", site, rdta->sites);
+  adef->gapyness = (double)gaps / (double)total;
+
+  if (site != rdta->sites)
+    {
+      if(processID == 0)
+	{
+	  printf("ERROR reading alignment: number of sites in header (%d) and number of lines with base frequencies (%zd) are different!\n", rdta->sites, site);
+	}
+      errorExit(-1);
+    }
 }
 
 static void parseFasta(analdef *adef, rawdata *rdta, tree *tr)
