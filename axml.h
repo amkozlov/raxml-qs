@@ -166,9 +166,9 @@
 #define PointGamma(prob,alpha,beta)  PointChi2(prob,2.0*(alpha))/(2.0*(beta))
 
 #define programName        "RAxML"
-#define programVersion     "8.1.17"
-#define programVersionInt   8117
-#define programDate        "February 5 2015"
+#define programVersion     "8.1.20"
+#define programVersionInt   8120
+#define programDate        "April 18 2015"
 
 
 #define  TREE_EVALUATION                 0
@@ -602,6 +602,7 @@ typedef struct {
   boolean ascBias;  
   int     ascOffset;
   int     *ascExpVector;
+  int     *ascMissingVector;
   double  *ascSumBuffer;
   double  *ascVector;
   double ascScaler[64];
@@ -1001,6 +1002,9 @@ typedef  struct  {
 
   boolean corrected_IC_Score;
 
+  boolean useK80;
+  boolean useJC69;
+
 #ifdef _USE_PTHREADS
 
   double *ancestralStates;
@@ -1067,8 +1071,7 @@ typedef  struct  {
   pthread_mutex_t** mutexesForHashing; 
 
 #endif
-  
-  int *origNumSitePerModel;
+    
   boolean doSubtreeEPA;
 
   // seq QS
@@ -1081,7 +1084,11 @@ typedef  struct  {
   double **tipProbVector;
   // seq QS
 
+  double ascMissing;
+  boolean useAscMissing;
+
 } tree;
+
 
 // seq error specification method
 #define SEQERR_NONE           0
@@ -1224,7 +1231,7 @@ typedef struct
 
 /****************************** FUNCTIONS ****************************************************/
 
-extern void ascertainmentBiasSequence(unsigned char tip[32], int numStates, int dataType);
+extern void ascertainmentBiasSequence(unsigned char tip[32], int numStates, int dataType, int nodeNumber, int *ascMissingVector);
 
 extern void computePlacementBias(tree *tr, analdef *adef);
 
@@ -1513,6 +1520,7 @@ extern void newviewIterativeAncestral(tree *tr);
 extern void newviewGenericAncestral(tree *tr, nodeptr p, boolean atRoot);
 extern void computeAncestralStates(tree *tr, double referenceLikelihood);
 extern void makeP_Flex(double z1, double z2, double *rptr, double *EI,  double *EIGN, int numberOfCategories, double *left, double *right, const int numStates);
+extern void makeP_FlexLG4(double z1, double z2, double *rptr, double *EI[4],  double *EIGN[4], int numberOfCategories, double *left, double *right, const int numStates);
 
 extern void *rax_malloc( size_t size );
 extern void *rax_realloc(void *p, size_t size, boolean needsMemoryAlignment);

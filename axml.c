@@ -2657,7 +2657,7 @@ static void sitesort(rawdata *rdta, cruncheddata *cdta, tree *tr, analdef *adef)
 }
 
 
-static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef *adef)
+static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef *adef, int countAscBias)
 {
   boolean  
     tied;
@@ -2672,10 +2672,7 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
     *aliasSuperModel = (int*)NULL,
     undeterminedSites = 0;
 
-  tr->origNumSitePerModel = (int*)rax_calloc(tr->NumberOfModels, sizeof(int));
  
-  for(i = 1; i <= rdta->sites; i++)
-    tr->origNumSitePerModel[tr->model[i]]++;
 
   if(adef->useMultipleModel)
     {
@@ -2687,23 +2684,22 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
   cdta->alias[0]    = cdta->alias[1];
   cdta->aliaswgt[0] = 0;
 
-  if(adef->mode == PER_SITE_LL || adef->mode == ANCESTRAL_STATES)
-    {
-      int i;
-
-      tr->patternPosition = (int*)rax_malloc(sizeof(int) * rdta->sites);
-      tr->columnPosition  = (int*)rax_malloc(sizeof(int) * rdta->sites);
-
-      for(i = 0; i < rdta->sites; i++)
-	{
-	  tr->patternPosition[i] = -1;
-	  tr->columnPosition[i]  = -1;
-	}
-    }
-
-  
+  //if(adef->mode == PER_SITE_LL || adef->mode == ANCESTRAL_STATES)
+  {
+    int i;
+    
+    tr->patternPosition = (int*)rax_malloc(sizeof(int) * rdta->sites);
+    tr->columnPosition  = (int*)rax_malloc(sizeof(int) * rdta->sites);
+    
+    for(i = 0; i < rdta->sites; i++)
+      {
+	tr->patternPosition[i] = -1;
+	tr->columnPosition[i]  = -1;
+      }
+  }
 
   i = 0;
+
   for (j = 1; j <= rdta->sites; j++)
     {
       int 
@@ -2728,8 +2724,6 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
 
       if(allGap)      
 	undeterminedSites++;
-
-      
       
       if(!adef->compressPatterns)
 	tied = 0;
@@ -2750,16 +2744,11 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
 
       assert(!(tied && allGap));
       
-      if (tied && !allGap)
-	{
-	  if(adef->mode == PER_SITE_LL || adef->mode == ANCESTRAL_STATES)
-	    {
-	      tr->patternPosition[j - 1] = i;
-	      tr->columnPosition[j - 1] = sitej;
-	      /* printf("Pattern %d from column %d also at site %d\n", i, sitei, sitej); */
-	    }
-
-
+      if(tied && !allGap)
+	{	  
+	  tr->patternPosition[j - 1] = i;
+	  tr->columnPosition[j - 1] = sitej;
+	  
 	  cdta->aliaswgt[i] += rdta->wgt[sitej];
 
 	  if(adef->useMultipleModel)
@@ -2774,34 +2763,33 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
 	    {
 	      if(cdta->aliaswgt[i] > 0) 
 		i++;
-	      
-	      if(adef->mode == PER_SITE_LL || adef->mode == ANCESTRAL_STATES)
-		{
-		  tr->patternPosition[j - 1] = i;
-		  tr->columnPosition[j - 1] = sitej;
-		  /*printf("Pattern %d is from cloumn %d\n", i, sitej);*/
-		}
-
+	      	      
+	      tr->patternPosition[j - 1] = i;
+	      tr->columnPosition[j - 1] = sitej;
+	
 	      cdta->aliaswgt[i] = rdta->wgt[sitej];
 	      cdta->alias[i] = sitej;
+	      
 	      if(adef->useMultipleModel)
 		{
 		  aliasModel[i]      = tr->model[sitej];
 		  aliasSuperModel[i] = tr->dataVector[sitej];
 		}
-	    }
+	    }	
 	}
     }
 
   cdta->endsite = i;
+
   if (cdta->aliaswgt[i] > 0) 
     cdta->endsite++;
 
-  if(adef->mode == PER_SITE_LL || adef->mode == ANCESTRAL_STATES)
+  if(adef->mode == PER_SITE_LL || adef->mode == ANCESTRAL_STATES || (countAscBias > 0))
     {
       if(undeterminedSites > 0)
 	{
-	  printBothOpen("You are trying to infer per site likelihoods or ancestral states\n");
+	  printBothOpen("You are trying to infer per site likelihoods or ancestral states or\n");
+	  printBothOpen("do calculations with an ascertainment bias correction\n");
 	  printBothOpen("on an alignment containing %d sites consisting only of undetermined\n", undeterminedSites);
 	  printBothOpen("characters. Please remove them first and then re-run RAxML!\n");
 
@@ -2813,12 +2801,14 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
 	  int 
 	    p  = tr->patternPosition[i],
 	    c  = tr->columnPosition[i];
-
+	  	  
 	  assert(p >= 0 && p < cdta->endsite);
 	  assert(c >= 1 && c <= rdta->sites);
 	}
     }
 
+ 
+ 
 
   if(adef->useMultipleModel)
     {
@@ -2842,7 +2832,7 @@ static void sitecombcrunch (rawdata *rdta, cruncheddata *cdta, tree *tr, analdef
 }
 
 
-static boolean makeweights (analdef *adef, rawdata *rdta, cruncheddata *cdta, tree *tr)
+static boolean makeweights (analdef *adef, rawdata *rdta, cruncheddata *cdta, tree *tr, int countAscBias)
 {
   int  i;
 
@@ -2850,7 +2840,7 @@ static boolean makeweights (analdef *adef, rawdata *rdta, cruncheddata *cdta, tr
     cdta->alias[i] = i;
 
   sitesort(rdta, cdta, tr, adef);
-  sitecombcrunch(rdta, cdta, tr, adef);
+  sitecombcrunch(rdta, cdta, tr, adef, countAscBias);
 
   return TRUE;
 }
@@ -3679,6 +3669,9 @@ static void allocPartitions(tree *tr)
     }
 }
 
+
+
+
 #ifndef _USE_PTHREADS
 
 
@@ -3718,6 +3711,8 @@ static void allocNodex (tree *tr)
 	  	 
 	  tr->partitionData[model].ascExpVector = (int *)rax_calloc(((size_t)tr->innerNodes) * ((size_t)tr->partitionData[model].states),
 								 sizeof(int));
+
+	  tr->partitionData[model].ascMissingVector = (int *)rax_calloc((size_t)(tr->mxtips + 1), sizeof(int));
 	  
 	  tr->partitionData[model].ascSumBuffer = (double *)rax_malloc(((size_t)tr->partitionData[model].ascOffset) *
 								       sizeof(double));
@@ -4957,7 +4952,7 @@ static void printMinusFUsage(void)
   printf("\n");
   printf("              \"-f a\": rapid Bootstrap analysis and search for best-scoring ML tree in one program run\n");  
 
-  printf("              \"-f A\": compute marginal ancestral states on a ROOTED reference tree provided with \"t\"\n");
+  printf("              \"-f A\": compute marginal ancestral states on a ROOTED reference tree provided with \"-t\"\n");
 
   printf("              \"-f b\": draw bipartition information on a tree provided with \"-t\" based on multiple trees\n");
   printf("                      (e.g., from a bootstrap) in a file specified by \"-z\"\n");
@@ -5124,6 +5119,7 @@ static void printREADME(void)
   printf("      [--flag-check][--auto-prot=ml|bic|aic|aicc]\n");
   printf("      [--epa-keep-placements=number][--epa-accumulated-threshold=threshold]\n");
   printf("      [--epa-prob-threshold=threshold]\n");
+  printf("      [--JC69][--K80][--asc-miss=fraction]\n");
   printf("\n");
   printf("      -a      Specify a column weight file name to assign individual weights to each column of \n");
   printf("              the alignment. Those weights must be integers separated by any type and number \n");
@@ -5538,6 +5534,17 @@ static void printREADME(void)
   printf("      --epa-accumulated-threshold=threshold specify an accumulated likelihood weight threshold for which different placements of read are printed\n");
   printf("                  to file. Placements for a read will be printed until the sum of their placement weights has reached the threshold value.\n");
   printf("                  Note that, this option can neither be used in combination with --epa-prob-threshold nor with --epa-keep-placements!\n");
+  printf("\n");
+  printf("      --JC69 specify that all DNA partitions will evolve under the Jukes-Cantor model, this overrides all other model specifications for DNA partitions.\n");
+  printf("\n");
+  printf("                  DEFAULT: Off\n");
+  printf("\n");
+  printf("      --K80 specify that all DNA partitions will evolve under the K80 model, this overrides all other model specifications for DNA partitions.\n");
+  printf("\n");
+  printf("                  DEFAULT: Off\n");
+  printf("\n");
+  printf("      --asc-miss=fraction specify the fraction of missing data in the variable sites of the alignment you are trying to correct for \n");
+  printf("                  ascertainment bias. Experimental option, needs to be tested!\n");
   printf("\n\n\n\n");
 
 }
@@ -5596,6 +5603,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
     fastEPAthreshold;
   
   int
+    fOptionCount = 0,
     invalidOptions = 0,
     i,
     c,
@@ -5659,6 +5667,15 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   tr->useAccumulatedEPACutoff = FALSE;
   tr->probThresholdEPA = 0.01;
 
+  //JC and K80 
+
+  tr->useK80 = FALSE;
+  tr->useJC69 = FALSE;
+
+  //asecryainment bias correction missing data 
+
+  tr->useAscMissing = FALSE;
+
 #ifdef _BASTIEN
   tr->doBastienStuff = FALSE;
 #endif
@@ -5685,7 +5702,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   while(1)
     {      
       static struct 
-	option long_options[13] =
+	option long_options[16] =
 	{
 	  /* These options set a flag. */
 	  {"mesquite",     no_argument,       &flag, 1},
@@ -5698,6 +5715,9 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	  {"epa-keep-placements",       required_argument, &flag, 1},
 	  {"epa-accumulated-threshold", required_argument, &flag, 1},
 	  {"epa-prob-threshold",        required_argument, &flag, 1}, 
+	  {"JC69",                      no_argument,       &flag, 1},
+	  {"K80",                       no_argument,       &flag,  1},
+	  {"asc-miss",                  required_argument, &flag, 1},
 	  {"seq-error",            required_argument, &flag, 1},
 	  {"fastq",            required_argument, &flag, 1},
 	  /* These options don't set a flag.
@@ -5871,6 +5891,29 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	      epaSet = TRUE;
 	      break;
 	    case 10:
+	      tr->useJC69 = TRUE;
+	      break;
+	    case 11:
+	      tr->useK80 = TRUE;
+	      break;
+	    case 12:
+	       if(sscanf(optarg, "%lf", &(tr->ascMissing)) != 1)
+		{
+		  printf("\nError parsing ascertainment bias missing data fraction correction, RAxML expects a floating point value > 0.0 and < 1.0\n\n");
+		  errorExit(-1);
+		}
+	       if(tr->ascMissing <= 0.0 || tr->ascMissing >= 1.0)
+		{
+		  printf("\nError parsing ascertainment missing data fraction correction, RAxML expects a floating point value >= 0.0 and <= 1.0\n\n");
+		  errorExit(-1);
+		}
+#ifdef _USE_PTHREADS
+	       printf("\nError: ascertainment missing data fraction correction not implemented for PThreads version yet, exiting!\n\n");
+	       errorExit(-1);
+#endif
+	       tr->useAscMissing = TRUE;
+	      break;
+      	    case 13:
 	      if (strcmp(optarg, "auto") == 0)
 		{
 		  tr->seqErrRate = 0.0;
@@ -5900,13 +5943,12 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 		}
 	      tr->useQS = TRUE;
 	      break;
-	    case 11:
+	    case 14:
 	      strcpy(fastqFileName, optarg);
 	      tr->useQS = TRUE;
 	      tr->useFASTQ = TRUE;
 	      tr->seqErrMode = SEQERR_PERSITE_FASTQ;
 	      adef->compressPatterns  = FALSE;
-	      break;
 	    default:
 	      if(flagCheck)
 		{
@@ -5917,6 +5959,15 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	      else
 		assert(0);
 	    }
+
+	  if(tr->useK80 && tr->useJC69)
+	    {
+	      printf("\nYou can't use \"--JC69\" and \"--K80\" options simultaneously!\n");
+	      printf("You can either use  \"--JC69\" or \"--K80\" !\n");
+	      printf("exiting .....\n\n");
+	      errorExit(-1);
+	    }
+
 	}
       else
 	switch(c)
@@ -6315,6 +6366,13 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	    break;     
 	  case 'f':
 	    sscanf(optarg, "%c", &modelChar);
+	    fOptionCount++;
+	    if(fOptionCount > 1) 
+	      {
+		printf("\nError: only one of the various \"-f \" options can be used per RAxML run!\n");
+		printf("They are mutually exclusive! exiting ...\n\n");
+		errorExit(-1);
+	      }
 	    switch(modelChar)
 	      {
 	      case 'A':
@@ -7635,10 +7693,30 @@ static void printModelAndProgramInfo(tree *tr, analdef *adef, int argc, char *ar
 	      switch(tr->partitionData[model].dataType)
 		{
 		case DNA_DATA:
-		  printBoth(infoFile, "DataType: DNA\n");		  
-		  printBoth(infoFile, "Substitution Matrix: GTR\n");
-		  if(tr->partitionData[model].optimizeBaseFrequencies)
-		    printBoth(infoFile, "Base frequencies: ML estimate\n");
+		  {
+		    char 
+		      *matrices[3] = {"GTR", "JC69", "K80"};
+		    
+		    int 
+		      index = -1;
+
+		    printBoth(infoFile, "DataType: DNA\n");
+		    
+		    if(tr->useJC69)
+		      index = 1;
+		    else
+		      {
+			if(tr->useK80)
+			  index = 2;
+			else
+			  index = 0;
+		      }
+		    
+		    printBoth(infoFile, "Substitution Matrix: %s\n", matrices[index]);
+		    
+		    if(tr->partitionData[model].optimizeBaseFrequencies)
+		      printBoth(infoFile, "Base frequencies: ML estimate\n");
+		  }
 		  break;
 		case AA_DATA:
 		  assert(tr->partitionData[model].protModels >= 0 && tr->partitionData[model].protModels < NUM_PROT_MODELS);
@@ -9115,6 +9193,8 @@ static void allocNodex(tree *tr, int tid, int n)
 
 	  tr->partitionData[model].ascExpVector = (int *)rax_calloc(((size_t)tr->innerNodes) * ((size_t)tr->partitionData[model].states),
 								 sizeof(int));
+
+	  tr->partitionData[model].ascMissingVector = (int *)rax_calloc((size_t)(tr->mxtips + 1), sizeof(int));
 	  
 	  tr->partitionData[model].ascSumBuffer = (double *)rax_malloc(((size_t)tr->partitionData[model].ascOffset) *
 								       sizeof(double));	  
@@ -12947,10 +13027,12 @@ static void rootTree(tree *tr, analdef *adef)
 static boolean partitionHasInvariantSites(tree *tr, int model)
 {
   unsigned int   
+    patternCount = 0,
     i;
 
   int
-    j;
+    j,
+    *patternIndices = (int *)rax_malloc(sizeof(int) * (tr->partitionData[model].upper - tr->partitionData[model].lower));
 
   const unsigned int 
     *bitVector = getBitVector(tr->partitionData[model].dataType),
@@ -12964,21 +13046,45 @@ static boolean partitionHasInvariantSites(tree *tr, int model)
       for(j = 1; j <= tr->mxtips; j++)		
 	encoding = encoding & bitVector[tr->yVector[j][i]];       
 
-      if(encoding > 0)    
-	{
-	  printBothOpen("Partition %d with name \"%s\" is to be analyzed using ascertainment bias correction, but it has at least one invariable site!\n", 
-			model, tr->partitionData[model].partitionName);
-	  printBothOpen("This is is not allowed! RAxML will print the offending site and then exit.\n\n");
-
-	  for(j = 1; j <= tr->mxtips; j++)
-	    printBothOpen("%c", getInverseMeaning(tr->partitionData[model].dataType, tr->yVector[j][i]));
-	  printBothOpen("\n");
-		   
-	  return TRUE;	  
-	}
+      if(encoding > 0)    	
+	patternIndices[patternCount++] = i;
     }
 
-  return FALSE;
+  if(patternCount > 0)
+    {     	
+      printBothOpen("Partition %d with name \"%s\" is to be analyzed using ascertainment bias correction, but it has %u invariable site(s)!\n", 
+		    model, tr->partitionData[model].partitionName, patternCount);
+      printBothOpen("This is is not allowed! RAxML will print the offending site(s) and then exit.\n\n");
+
+      for(i = 0; i < patternCount; i++)	
+	{
+	  int 
+	    k;
+	  
+	  printBothOpen("Pattern: ");
+	  for(j = 1; j <= tr->mxtips; j++)
+	    printBothOpen("%c", getInverseMeaning(tr->partitionData[model].dataType, tr->yVector[j][patternIndices[i]]));
+	  printBothOpen("\n");
+
+	  printBothOpen("Pattern occurs at the following sites of the input alignment: \n");
+	    
+	  for(k = 0; k < tr->rdta->sites; k++)	    
+	    if(patternIndices[i] == tr->patternPosition[k])
+	      printBothOpen("Site %d \n", tr->columnPosition[k]); 
+	  
+	  printBothOpen("\n");
+	}	 	
+	     	   
+      rax_free(patternIndices);
+
+      return TRUE;	        
+    }
+  else
+    {
+      rax_free(patternIndices);
+
+      return FALSE;
+    }
 }
 
 static void checkAscBias(tree *tr)
@@ -13337,6 +13443,34 @@ static void stealBranchLengths(tree *tr, analdef *adef)
 }
 
 
+static void setupAscMissing(tree *tr, analdef *adef)
+ {
+   int     
+     model,    
+     *perm = (int*)rax_malloc(sizeof(int) * (size_t)(tr->mxtips + 1));  
+  
+   for(model = 0; model < tr->NumberOfModels; model++)
+     {
+       if(tr->partitionData[model].ascBias && tr->useAscMissing)
+	 {
+	   int
+	     cutoff = (int)(tr->ascMissing * (double)(tr->mxtips) + 0.5),
+	     i;
+
+	   makePermutation(perm, 1, tr->mxtips, adef);	    
+	    
+	   for(i = 1; i <= cutoff; i++)	     	      
+	     tr->partitionData[model].ascMissingVector[perm[i]] = 1;	    	   
+	 }
+     }
+	
+   //TODO need to add barrier for copying ascMissingVector to all threads 
+   //and we also need to copy the flag value!
+ 
+   rax_free(perm);
+ }
+
+
 
 /*******************************************************/
 
@@ -13490,14 +13624,17 @@ int main (int argc, char *argv[])
 	  countNonSev = 0,
 	  countLG4 =0;
 	
-	makeweights(adef, rdta, cdta, tr);
+	assert(countAscBias == 0);
+
+	for(i = 0; i < tr->NumberOfModels; i++)	  
+	  if(tr->partitionData[i].ascBias)
+	    countAscBias++;
+
+	makeweights(adef, rdta, cdta, tr, countAscBias);
 	makevalues(rdta, cdta, tr, adef);      
 	
 	for(i = 0; i < tr->NumberOfModels; i++)
-	  {
-	    if(tr->partitionData[i].ascBias)
-	      countAscBias++;
-	    
+	  {	    
 	    if(!(tr->partitionData[i].dataType == AA_DATA || tr->partitionData[i].dataType == DNA_DATA))
 	      countNonSev++;
 	    
@@ -13641,8 +13778,9 @@ int main (int argc, char *argv[])
     
     
     readAscFiles(tr);
-   
-    
+
+    setupAscMissing(tr, adef);
+
     if(!adef->readTaxaOnly) 
       {
 #ifdef _USE_PTHREADS
