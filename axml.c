@@ -9001,11 +9001,99 @@ static void initTipProbVector(tree *tr, tree *localTree)
     }
 }
 
+
+static double haddScalar(VECTOR_DOUBLE v)
+{
+  double
+    result;
+
+#if defined(__AVX)
+  double
+    ra[4] __attribute__ ((aligned (BYTE_ALIGNMENT)));
+
+  v = _mm256_hadd_pd(v, v);
+
+  _mm256_store_pd(ra, v);
+
+  result = ra[0] + ra[2];
+
+#elif defined(__SIM_SSE3)
+  v = _mm_hadd_pd(v, v);
+
+  _mm_storel_pd(&result, v);
+#else
+  // not gonna happen
+  assert(0);
+#endif
+
+  return result;
+}
+
+//static void updateTipXVectors(tree *tr, size_t model)
+//{
+//  size_t
+//    i,
+//    j;
+//
+//  const size_t
+//    states = (size_t)(tr->partitionData[model].states),
+//    loopLength = states - (states % VECTOR_WIDTH),
+//    width =  tr->partitionData[model].width;
+//
+//  const double
+//    *EV = tr->partitionData[model].EV;
+//
+//  double
+//    EV_T[states * states] __attribute__ ((aligned (BYTE_ALIGNMENT)));
+//
+//  //calculate transpose of EV matrix
+//
+//  for(i = 0; i < states; i++)
+//    for(j = 0; j < states; j++)
+//      EV_T[states * i + j] = EV[states * j + i];
+//
+//  for(i = 1; i <= (size_t)tr->mxtips; i++)
+//    {
+//      double
+//    *xv = tr->partitionData[model].xTipVector[i],
+//    *pv = tr->partitionData[model].xTipCLV[i];
+//
+//      for(j = 0; j < width; j++)
+//    {
+//      double
+//        *prob = &pv[j * states],
+//        *x    = &xv[j * states];
+//
+//      size_t
+//        l,
+//        m;
+//
+//      for(l = 0; l < states; l++)
+//        {
+//	  VECTOR_DOUBLE _x = VECTOR_SET_ZERO();
+//
+//          for(m = 0; m < loopLength; m += VECTOR_WIDTH)
+//        _x = VECTOR_ADD(_x, VECTOR_MUL(VECTOR_LOAD(&prob[m]), VECTOR_LOAD(&EV_T[states * l + m])));
+//
+//          x[l] =  haddScalar(_x);
+//
+//          //for loop below not tested yet!
+//          //what happens when the vector_width is > the number of states??? -> never tested so far ....
+//          for(; m < states; m++)
+//        x[l] += prob[m] * EV_T[states * l + m];
+//
+//          if(x[l] > MAX_TIP_EV)
+//        x[l] = MAX_TIP_EV;
+//        }
+//    }
+//    }
+//}
+
 static void updateTipXVectors(tree *tr, tree *localTree)
 {
   size_t
     model,
-    i;
+    i, j;
 
   for(model = 0; model < (size_t)localTree->NumberOfModels; model++)
     {
@@ -9017,24 +9105,33 @@ static void updateTipXVectors(tree *tr, tree *localTree)
       else
 	rateHet = 4;
 
-      size_t
+      const size_t
 	width =  localTree->partitionData[model].width,
 	states = (size_t)(localTree->partitionData[model].states),
+	loopLength = states - (states % VECTOR_WIDTH),
 	xWidth =  rateHet * states * width;
+
+      //calculate transpose of EV matrix
+      double
+        *EV = tr->partitionData[model].EV,
+        EV_T[states * states] __attribute__ ((aligned (BYTE_ALIGNMENT)));
+
+      for(i = 0; i < states; i++)
+        for(j = 0; j < states; j++)
+          EV_T[states * i + j] = EV[states * j + i];
 
       for(i = 1; i < tr->mxtips + 1; i++)
 	{
 	  size_t
 	    offset = 0;
 	  size_t
-	    j, k, l, m;
+	    k, l, m;
 //	  unsigned char
 //	    *tipX1 = localTree->partitionData[model].yVector[i];
 
 	  double
 	    *xv = localTree->partitionData[model].xVector[i],
-	    *pv = localTree->partitionData[model].tipProbVector[i],
-	    *EV = tr->partitionData[model].EV;
+	    *pv = localTree->partitionData[model].tipProbVector[i];
 
 	  assert(pv != NULL);
 	  assert(xv != NULL);
@@ -9048,20 +9145,39 @@ static void updateTipXVectors(tree *tr, tree *localTree)
 		*prob = &pv[j * states];
 
 	      for(k = 0; k < rateHet; k++)
-		for(l = 0; l < states; l++)
-		  {
-//		    xv[offset] = tipv[l];
-		    xv[offset] = 0;
-		    for(m = 0; m < states; m++)
-		      xv[offset] += prob[m] * EV[states * m + l];
+		{
 
-		    if(xv[offset] > MAX_TIP_EV)
-		      xv[offset] = MAX_TIP_EV;
+		  for(l = 0; l < states; l++)
+		    {
+  //		      xv[offset] = tipv[l];
 
-//		    assert(fabs(tipv[l] - xv[offset]) < 0.00001);
+#if defined(__AVX) || defined(__SIM_SSE3)
 
-		    offset++;
-		  }
+		      VECTOR_DOUBLE _x = VECTOR_SET_ZERO();
+
+		      for(m = 0; m < loopLength; m += VECTOR_WIDTH)
+			_x = VECTOR_ADD(_x, VECTOR_MUL(VECTOR_LOAD(&prob[m]), VECTOR_LOAD(&EV_T[states * l + m])));
+
+		      xv[offset] =  haddScalar(_x);
+
+		      //for loop below not tested yet!
+		      //what happens when the vector_width is > the number of states??? -> never tested so far ....
+		      for(; m < states; m++)
+			xv[offset] += prob[m] * EV_T[states * l + m];
+#else
+		      xv[offset] = 0;
+		      for(m = 0; m < states; m++)
+			xv[offset] += prob[m] * EV_T[states * l + m];
+#endif
+
+		      if(xv[offset] > MAX_TIP_EV)
+			xv[offset] = MAX_TIP_EV;
+
+  //		      assert(fabs(tipv[l] - xv[offset]) < 0.00001);
+
+		      offset++;
+		    }
+		}
 	    }
 
 	  assert(offset == xWidth);
@@ -9088,6 +9204,7 @@ static void initPartition(tree *tr, tree *localTree, int tid)
       localTree->perPartitionEPA         = tr->perPartitionEPA;
       localTree->maxCategories           = tr->maxCategories;
       localTree->useQS           	 = tr->useQS;
+      localTree->rateHetModel            = tr->rateHetModel;
      
       localTree->originalCrunchedLength  = tr->originalCrunchedLength;
       localTree->NumberOfModels          = tr->NumberOfModels;
@@ -9347,7 +9464,7 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
   currentJob = threadJob >> 16;
 
   switch(currentJob)
-    {     
+    {
     case THREAD_INIT_PARTITION:
       initPartition(tr, localTree, tid);
       break;

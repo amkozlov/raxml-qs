@@ -37,9 +37,33 @@
 #include <sys/types.h>
 
 #ifdef __AVX
+#include <xmmintrin.h>
+#include <immintrin.h>
 #define BYTE_ALIGNMENT 32
-#else
+#define VECTOR_WIDTH 4
+#define VECTOR_DOUBLE __m256d
+#define VECTOR_SET_ZERO _mm256_setzero_pd
+#define VECTOR_LOAD _mm256_load_pd
+#define VECTOR_STORE _mm256_store_pd
+#define VECTOR_ADD _mm256_add_pd
+#define VECTOR_MUL _mm256_mul_pd
+
+#elif defined(__SIM_SSE3)
+#include <xmmintrin.h>
+#include <pmmintrin.h>
+
 #define BYTE_ALIGNMENT 16
+#define VECTOR_WIDTH 2
+#define VECTOR_DOUBLE __m128d
+#define VECTOR_SET_ZERO _mm_setzero_pd
+#define VECTOR_LOAD _mm_load_pd
+#define VECTOR_STORE _mm_store_pd
+#define VECTOR_ADD _mm_add_pd
+#define VECTOR_MUL _mm_mul_pd
+
+#else
+#define BYTE_ALIGNMENT 8
+#define VECTOR_WIDTH 1
 #endif
 
 

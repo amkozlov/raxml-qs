@@ -7942,7 +7942,9 @@ void newviewIterative (tree *tr)
 	      if(requiredLength != availableLength)
 		{		  
 		  if(x3_start)
-		    rax_free(x3_start);
+		    {
+		      rax_free(x3_start);
+		    }
 		 
 		  x3_start = (double*)rax_malloc(requiredLength);		 
 		  
