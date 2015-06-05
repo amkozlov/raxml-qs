@@ -9029,66 +9029,6 @@ static double haddScalar(VECTOR_DOUBLE v)
   return result;
 }
 
-//static void updateTipXVectors(tree *tr, size_t model)
-//{
-//  size_t
-//    i,
-//    j;
-//
-//  const size_t
-//    states = (size_t)(tr->partitionData[model].states),
-//    loopLength = states - (states % VECTOR_WIDTH),
-//    width =  tr->partitionData[model].width;
-//
-//  const double
-//    *EV = tr->partitionData[model].EV;
-//
-//  double
-//    EV_T[states * states] __attribute__ ((aligned (BYTE_ALIGNMENT)));
-//
-//  //calculate transpose of EV matrix
-//
-//  for(i = 0; i < states; i++)
-//    for(j = 0; j < states; j++)
-//      EV_T[states * i + j] = EV[states * j + i];
-//
-//  for(i = 1; i <= (size_t)tr->mxtips; i++)
-//    {
-//      double
-//    *xv = tr->partitionData[model].xTipVector[i],
-//    *pv = tr->partitionData[model].xTipCLV[i];
-//
-//      for(j = 0; j < width; j++)
-//    {
-//      double
-//        *prob = &pv[j * states],
-//        *x    = &xv[j * states];
-//
-//      size_t
-//        l,
-//        m;
-//
-//      for(l = 0; l < states; l++)
-//        {
-//	  VECTOR_DOUBLE _x = VECTOR_SET_ZERO();
-//
-//          for(m = 0; m < loopLength; m += VECTOR_WIDTH)
-//        _x = VECTOR_ADD(_x, VECTOR_MUL(VECTOR_LOAD(&prob[m]), VECTOR_LOAD(&EV_T[states * l + m])));
-//
-//          x[l] =  haddScalar(_x);
-//
-//          //for loop below not tested yet!
-//          //what happens when the vector_width is > the number of states??? -> never tested so far ....
-//          for(; m < states; m++)
-//        x[l] += prob[m] * EV_T[states * l + m];
-//
-//          if(x[l] > MAX_TIP_EV)
-//        x[l] = MAX_TIP_EV;
-//        }
-//    }
-//    }
-//}
-
 static void updateTipXVectors(tree *tr, tree *localTree)
 {
   size_t
