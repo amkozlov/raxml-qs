@@ -1100,7 +1100,6 @@ typedef  struct  {
 
   // seq QS
   boolean useQS;
-  boolean useFASTQ;
   boolean estimateSeqErr;
   int seqErrMode;
   double seqErrRate;

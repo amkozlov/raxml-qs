@@ -893,7 +893,7 @@ static boolean setupTree (tree *tr, analdef *adef)
     {
       tr->yVector      = (unsigned char **)  rax_malloc((tr->mxtips + 1) * sizeof(unsigned char *));
 
-      if (tr->useFASTQ)
+      if (tr->seqErrMode == SEQERR_PERSITE_FASTQ)
 	tr->tipErrVector  = (double **)  rax_malloc((tr->mxtips + 1) * sizeof(double *));
       else
 	tr->tipErrVector  = NULL;
@@ -5681,7 +5681,6 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 #endif
 
   tr->useQS = FALSE;
-  tr->useFASTQ = FALSE;
   tr->estimateSeqErr = FALSE;
   tr->seqErrMode = SEQERR_NONE;
 
@@ -5946,9 +5945,9 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	    case 14:
 	      strcpy(fastqFileName, optarg);
 	      tr->useQS = TRUE;
-	      tr->useFASTQ = TRUE;
 	      tr->seqErrMode = SEQERR_PERSITE_FASTQ;
 	      adef->compressPatterns  = FALSE;
+	      break;
 	    default:
 	      if(flagCheck)
 		{
@@ -9144,6 +9143,7 @@ static void initPartition(tree *tr, tree *localTree, int tid)
       localTree->perPartitionEPA         = tr->perPartitionEPA;
       localTree->maxCategories           = tr->maxCategories;
       localTree->useQS           	 = tr->useQS;
+      localTree->seqErrMode		 = tr->seqErrMode;
       localTree->rateHetModel            = tr->rateHetModel;
      
       localTree->originalCrunchedLength  = tr->originalCrunchedLength;
@@ -9288,14 +9288,14 @@ static void allocNodex(tree *tr, int tid, int n)
 	    }
 
 	    tr->partitionData[model].tipProbVector = (double **)rax_malloc(sizeof(double*) * (tr->mxtips + 1));
-	    if (tr->useFASTQ)
+	    if (tr->seqErrMode == SEQERR_PERSITE_FASTQ)
 	      tr->partitionData[model].tipErrVector = (double **)rax_malloc(sizeof(double*) * (tr->mxtips + 1));
 	    else
 	      tr->partitionData[model].tipErrVector = (double **) NULL;
 	    for(i = 1; i < tr->mxtips + 1; i++)
 	      {
 		tr->partitionData[model].tipProbVector[i] = (double *)rax_malloc(sizeof(double) * states * width);
-		if (tr->useFASTQ)
+		if (tr->seqErrMode == SEQERR_PERSITE_FASTQ)
 		  tr->partitionData[model].tipErrVector[i] = (double *)rax_malloc(sizeof(double) * width);
 	      }
 
@@ -9700,7 +9700,7 @@ static void execFunction(tree *tr, tree *localTree, int tid, int n)
       if(tid > 0)
 	{
 	  localTree->rateHetModel       = tr->rateHetModel;
-	  localTree->seqErrMode       	= tr->seqErrMode;
+//	  localTree->seqErrMode       	= tr->seqErrMode;
 
 	  for(model = 0; model < localTree->NumberOfModels; model++)
 	    {
