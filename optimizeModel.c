@@ -3519,12 +3519,14 @@ void modOpt(tree *tr, analdef *adef, boolean resetModel, double likelihoodEpsilo
   freqList = initLinkageList(unlinked, tr);
   seqerrList = initLinkageList(linked, tr);
     
+#ifndef __BLACKRIM
   if(!(adef->mode == CLASSIFY_ML))
     {
       if(tr->start != tr->nodep[1])
 	changedRoot = TRUE;      
       tr->start = tr->nodep[1];
     }
+#endif
   
   if(resetModel)
     {
@@ -4344,7 +4346,7 @@ static void optimizeRatesBFGS(tree *tr)
       for(k = 0; k < 5; k++, i++)
 	{
 	  guessGTR[i] = tr->partitionData[model].substRates[k];	
-	  bound_check_GTR[i] = TRUE;
+	  bound_check_GTR[i] = FALSE;
 	  lowerGTR[i] = RATE_MIN;
 	  upperGTR[i] = RATE_MAX;
 	}
@@ -4353,6 +4355,20 @@ static void optimizeRatesBFGS(tree *tr)
   assert(i == nGTR + 1);
  
   minimizeMultiDimen(guessGTR, nGTR, lowerGTR, upperGTR, bound_check_GTR, 0.0001, tr);  
+
+  
+
+  memcpy(tr->partitionData[0].substRates, &guessGTR[1], sizeof(double) * 5); 
+
+  //for(i = 0; i < 6; i++)
+  //printf("%f ", tr->partitionData[0].substRates[i]);
+  //printf("\n");
+ 
+  initReversibleGTR(tr, 0);
+  
+#ifdef _USE_PTHREADS
+  masterBarrier(THREAD_COPY_RATES, tr);	
+#endif
 
   evaluateGenericInitrav(tr, tr->start);
   endLH = tr->likelihood;

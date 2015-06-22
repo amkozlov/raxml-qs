@@ -3850,6 +3850,7 @@ static void initAdef(analdef *adef)
   adef->silent = FALSE;
   adef->noSequenceCheck = FALSE;
   adef->useBFGS = TRUE;
+  adef->setThreadAffinity = FALSE;
 }
 
 static int modelExists(char *model, analdef *adef)
@@ -5120,6 +5121,9 @@ static void printREADME(void)
   printf("      [--epa-keep-placements=number][--epa-accumulated-threshold=threshold]\n");
   printf("      [--epa-prob-threshold=threshold]\n");
   printf("      [--JC69][--K80][--asc-miss=fraction]\n");
+#if (defined(_WAYNE_MPI) && defined(_USE_PTHREADS))
+  printf("      [--set-thread-affinity]\n");
+#endif
   printf("\n");
   printf("      -a      Specify a column weight file name to assign individual weights to each column of \n");
   printf("              the alignment. Those weights must be integers separated by any type and number \n");
@@ -5545,6 +5549,13 @@ static void printREADME(void)
   printf("\n");
   printf("      --asc-miss=fraction specify the fraction of missing data in the variable sites of the alignment you are trying to correct for \n");
   printf("                  ascertainment bias. Experimental option, needs to be tested!\n");
+#if (defined(_WAYNE_MPI) && defined(_USE_PTHREADS))
+  printf("\n");
+  printf("      --set-thread-affinity specify that thread-to-core affinity shall be set by RAxML for the hybrid MPI-PThreads version\n");
+  printf("\n");
+  printf("                  DEFAULT: Off\n");  
+  printf("\n");
+#endif
   printf("\n\n\n\n");
 
 }
@@ -5701,7 +5712,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
   while(1)
     {      
       static struct 
-	option long_options[16] =
+	option long_options[17] =
 	{
 	  /* These options set a flag. */
 	  {"mesquite",     no_argument,       &flag, 1},
@@ -5717,6 +5728,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 	  {"JC69",                      no_argument,       &flag, 1},
 	  {"K80",                       no_argument,       &flag,  1},
 	  {"asc-miss",                  required_argument, &flag, 1},
+	  {"set-thread-affinity",       no_argument,       &flag, 1},
 	  {"seq-error",            required_argument, &flag, 1},
 	  {"fastq",            required_argument, &flag, 1},
 	  /* These options don't set a flag.
@@ -5912,7 +5924,14 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 #endif
 	       tr->useAscMissing = TRUE;
 	      break;
-      	    case 13:
+	    case 13:
+#if (defined(_WAYNE_MPI) && defined(_USE_PTHREADS))
+	      adef->setThreadAffinity = TRUE;
+#else
+	      printf("Warning: flag --set-thread-affinity has no effect if you don't use the hybrid MPI-PThreads version\n");
+#endif
+	      break;
+      	    case 14:
 	      if (strcmp(optarg, "auto") == 0)
 		{
 		  tr->seqErrRate = 0.0;
@@ -5942,7 +5961,7 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
 		}
 	      tr->useQS = TRUE;
 	      break;
-	    case 14:
+	    case 15:
 	      strcpy(fastqFileName, optarg);
 	      tr->useQS = TRUE;
 	      tr->seqErrMode = SEQERR_PERSITE_FASTQ;
@@ -6938,6 +6957,16 @@ static void get_args(int argc, char *argv[], analdef *adef, tree *tr)
       
       adef->constraintSeed = adef->parsimonySeed;
       assert(adef->constraintSeed > 0);
+    }
+
+  if(tr->searchConvergenceCriterion && ((adef->rapidBoot > 0) || (adef->allInOne)))
+    {
+      if(processID == 0)
+	{
+	  printf("\nError: the tree search convergence criterion \"-D\" has no effect in conjunction with the: \n");
+	  printf("\"-x\" or \"-f a\" options.\n\n");
+	  errorExit(-1);
+	}
     }
 
   if(adef->mode == SH_LIKE_SUPPORTS)
@@ -10639,7 +10668,7 @@ static int setPthreadAffinity(void)
 
 #endif
 
-static void startPthreads(tree *tr)
+static void startPthreads(tree *tr, analdef *adef)
 {
   pthread_t *threads;
   pthread_attr_t attr;
@@ -10675,10 +10704,13 @@ static void startPthreads(tree *tr)
    * their parent thread.
    */
   
-  if(setPthreadAffinity() != 0) 
+  if(adef->setThreadAffinity)
     {
-      printf("Warning: Error setting thread processor affinity.\n");
-      printf("         This may adversely impact multi-core performance.\n");
+      if(setPthreadAffinity() != 0) 
+	{
+	  printf("Warning: Error setting thread processor affinity.\n");
+	  printf("         This may adversely impact multi-core performance.\n");
+	}
     }
 #endif
 
@@ -12052,7 +12084,7 @@ static void groupingParser(char *quartetGroupFileName, int *groups[4], int group
 }
 
 
-static double quartetLikelihood(tree *tr, nodeptr p1, nodeptr p2, nodeptr p3, nodeptr p4, nodeptr q1, nodeptr q2)
+static double quartetLikelihood(tree *tr, nodeptr p1, nodeptr p2, nodeptr p3, nodeptr p4, nodeptr q1, nodeptr q2, analdef *adef, boolean firstQuartet)
 {
   /* 
      build a quartet tree, where q1 and q2 are the inner nodes and p1, p2, p3, p4
@@ -12080,6 +12112,16 @@ static double quartetLikelihood(tree *tr, nodeptr p1, nodeptr p2, nodeptr p3, no
 
   newviewGeneric(tr, q1);
   newviewGeneric(tr, q2);
+
+  
+#ifdef __BLACKRIM 
+  if(firstQuartet)
+    {
+      tr->start = q1->next->back;
+  
+      modOpt(tr, adef, TRUE, adef->likelihoodEpsilon);
+    }
+#endif
   
   /* call a function that is also used for NNIs that iteratively optimizes all 
      5 branch lengths in the tree.
@@ -12189,7 +12231,7 @@ static void startQuartetMaster(tree *tr, FILE *f)
 
 #endif
 
-static void computeAllThreeQuartets(tree *tr, nodeptr q1, nodeptr q2, int t1, int t2, int t3, int t4, FILE *f)
+static void computeAllThreeQuartets(tree *tr, nodeptr q1, nodeptr q2, int t1, int t2, int t3, int t4, FILE *f, analdef *adef)
 {
   /* set the tip nodes to different sequences 
      with the tip indices t1, t2, t3, t4 */
@@ -12212,7 +12254,7 @@ static void computeAllThreeQuartets(tree *tr, nodeptr q1, nodeptr q2, int t1, in
   
   /* compute the likelihood of tree ((p1, p2), (p3, p4)) */
   
-  l = quartetLikelihood(tr, p1, p2, p3, p4, q1, q2);
+  l = quartetLikelihood(tr, p1, p2, p3, p4, q1, q2, adef, TRUE);
  
 #ifndef _QUARTET_MPI
   fprintf(f, "%d %d | %d %d: %f\n", p1->number, p2->number, p3->number, p4->number, l);
@@ -12227,7 +12269,7 @@ static void computeAllThreeQuartets(tree *tr, nodeptr q1, nodeptr q2, int t1, in
   
   /* compute the likelihood of tree ((p1, p3), (p2, p4)) */
   
-  l = quartetLikelihood(tr, p1, p3, p2, p4, q1, q2);
+  l = quartetLikelihood(tr, p1, p3, p2, p4, q1, q2, adef, FALSE);
 
 #ifndef _QUARTET_MPI  
   fprintf(f, "%d %d | %d %d: %f\n", p1->number, p3->number, p2->number, p4->number, l);
@@ -12242,7 +12284,7 @@ static void computeAllThreeQuartets(tree *tr, nodeptr q1, nodeptr q2, int t1, in
   
   /* compute the likelihood of tree ((p1, p4), (p2, p3)) */
   
-  l = quartetLikelihood(tr, p1, p4, p2, p3, q1, q2);
+  l = quartetLikelihood(tr, p1, p4, p2, p3, q1, q2, adef, FALSE);
   
 #ifndef _QUARTET_MPI
   fprintf(f, "%d %d | %d %d: %f\n", p1->number, p4->number, p2->number, p3->number, l);	    	   
@@ -12336,8 +12378,9 @@ static void computeQuartets(tree *tr, analdef *adef, rawdata *rdta, cruncheddata
       getStartingTree(tr, adef);
    
       /* optimize model parameters on that comprehensive tree that can subsequently be used for qyartet building */
-
+#ifndef __BLACKRIM 
       modOpt(tr, adef, TRUE, adef->likelihoodEpsilon);
+#endif
 
       printBothOpen("Time for parsing input tree or building parsimony tree and optimizing model parameters: %f\n\n", gettime() - masterTime); 
     }
@@ -12355,6 +12398,17 @@ static void computeQuartets(tree *tr, analdef *adef, rawdata *rdta, cruncheddata
     {
       flavor = GROUPED_QUARTETS;
       groupingParser(quartetGroupingFileName, groups, groupSize, tr);
+
+#ifdef __BLACKRIM     
+      numberOfQuartets =  (uint64_t)groupSize[0] * (uint64_t)groupSize[1] * (uint64_t)groupSize[2] * (uint64_t)groupSize[3];
+
+      if(randomQuartets > numberOfQuartets)
+	randomQuartets = 1;
+
+      fraction = (double)randomQuartets / (double)numberOfQuartets;     
+
+      //printf("%d %d %f\n", numberOfQuartets, randomQuartets, fraction);
+#endif
     }
   else
     {
@@ -12381,8 +12435,15 @@ static void computeQuartets(tree *tr, analdef *adef, rawdata *rdta, cruncheddata
       printBothOpen("There are %" PRIu64 " quartet sets for which RAxML will randomly sub-sambple %" PRIu64 " sets (%f per cent), i.e., compute %" PRIu64 " quartet trees\n", 
 		    numberOfQuartets, randomQuartets, 100 * fraction, randomQuartets * 3);
       break;
-    case GROUPED_QUARTETS:           
-      printBothOpen("There are 4 quartet groups from which RAxML will evaluate all %u quartet trees\n", (unsigned int)groupSize[0] * (unsigned int)groupSize[1] * (unsigned int)groupSize[2] * (unsigned int)groupSize[3] * 3);
+    case GROUPED_QUARTETS:  
+#ifdef __BLACKRIM          
+      printBothOpen("There are 4 quartet groups from which RAxML will evaluate the three alternatives for %u out of all possible %u quartet trees\n", 
+		    (unsigned int)randomQuartets, 
+		    (unsigned int)groupSize[0] * (unsigned int)groupSize[1] * (unsigned int)groupSize[2] * (unsigned int)groupSize[3]);
+#else
+      printBothOpen("There are 4 quartet groups from which RAxML will evaluate all %u quartet trees\n", 
+		    (unsigned int)groupSize[0] * (unsigned int)groupSize[1] * (unsigned int)groupSize[2] * (unsigned int)groupSize[3] * 3);
+#endif
       break;
     default:
       assert(0);
@@ -12434,7 +12495,7 @@ static void computeQuartets(tree *tr, analdef *adef, rawdata *rdta, cruncheddata
 #ifdef _QUARTET_MPI
 		      if((quartetCounter % (uint64_t)(processes - 1)) == (uint64_t)(processID - 1))
 #endif
-			computeAllThreeQuartets(tr, q1, q2, t1, t2, t3, t4, f);
+			computeAllThreeQuartets(tr, q1, q2, t1, t2, t3, t4, f, adef);
 		      quartetCounter++;
 		    }
 	    
@@ -12458,7 +12519,7 @@ static void computeQuartets(tree *tr, analdef *adef, rawdata *rdta, cruncheddata
 #ifdef _QUARTET_MPI
 			  if((quartetCounter % (uint64_t)(processes - 1)) == (uint64_t)(processID - 1))
 #endif
-			    computeAllThreeQuartets(tr, q1, q2, t1, t2, t3, t4, f);
+			    computeAllThreeQuartets(tr, q1, q2, t1, t2, t3, t4, f, adef);
 			  quartetCounter++;
 			}
 		      
@@ -12485,14 +12546,33 @@ static void computeQuartets(tree *tr, analdef *adef, rawdata *rdta, cruncheddata
 			i3 = groups[2][t3],
 			i4 = groups[3][t4];
 		      
-#ifdef _QUARTET_MPI
-		      if((quartetCounter % (uint64_t)(processes - 1)) == (uint64_t)(processID - 1))
+#ifdef __BLACKRIM
+		      double
+			r = randum(&adef->parsimonySeed);
+		      
+		      if(r < fraction)
+			{
 #endif
-			computeAllThreeQuartets(tr, q1, q2, i1, i2, i3, i4, f);
-		      quartetCounter++;
+			  
+#ifdef _QUARTET_MPI
+			  if((quartetCounter % (uint64_t)(processes - 1)) == (uint64_t)(processID - 1))
+#endif
+			    computeAllThreeQuartets(tr, q1, q2, i1, i2, i3, i4, f, adef);
+			  quartetCounter++;
+#ifdef __BLACKRIM
+			}
+		      if(quartetCounter == randomQuartets)
+			goto DONE_GROUPED;
+#endif
 		    }
-	    
+#ifdef __BLACKRIM   
+	  DONE_GROUPED:
+	    printBothOpen("\nComputed %" PRIu64 " random quartets for grouping\n", quartetCounter);
+	    assert(quartetCounter == randomQuartets);
+#else
 	    printBothOpen("\nComputed all %" PRIu64 " possible grouped quartets\n", quartetCounter);
+#endif	    
+	    
 	  }
 	  break;
 	default:
@@ -13824,7 +13904,7 @@ int main (int argc, char *argv[])
       }
 
 #ifdef _USE_PTHREADS
-    startPthreads(tr);
+    startPthreads(tr, adef);
     masterBarrier(THREAD_INIT_PARTITION, tr);
     if(!adef->readTaxaOnly)  
       masterBarrier(THREAD_ALLOC_LIKELIHOOD, tr);
