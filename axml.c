@@ -2022,7 +2022,7 @@ static void parseFASTQ(analdef *adef, rawdata *rdta, tree *tr)
 	        fastqChar = seq_line[i];
 	      uppercase(&fastqChar);
 
-	      if (inverseMeaningDNA[ch] != seq_line[i])
+	      if (inverseMeaningDNA[ch] != fastqChar)
 		{
 		  printf("ERROR: base mismatch in taxa %zu between FASTA (base %d = %c) and FASTQ (base %d = %c)!\n",
 		         taxon_num, tip_pos + 1, inverseMeaningDNA[ch], i + 1, fastqChar);
